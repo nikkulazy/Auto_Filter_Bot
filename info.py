@@ -226,9 +226,9 @@ else:
     ON_HEROKU = False
 HAS_SSL = bool(getenv('HAS_SSL', True))
 if HAS_SSL:
-    URL = "https://conservation-cathyleen-tuheed-fe59a4a9.koyeb.app/".format(FQDN)
+    URL = "https://hilarious-pietra-nikkulazy-01c4fe41.koyeb.app/".format(FQDN)
 else:
-    URL = "https://conservation-cathyleen-tuheed-fe59a4a9.koyeb.app/".format(FQDN)
+    URL = "https://hilarious-pietra-nikkulazy-01c4fe41.koyeb.app/".format(FQDN)
 
 # ============================
 # Reactions Configuration
