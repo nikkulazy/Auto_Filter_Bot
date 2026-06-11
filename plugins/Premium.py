@@ -115,7 +115,7 @@ async def payment_screenshot_handler(client, message: Message):
 # -------------------------------------------------------------------------
 # ✅ MAIN CALLBACK HANDLER (SINGLE HANDLER FOR ALL) - FIXED
 # -------------------------------------------------------------------------
-@Client.on_callback_query()
+@Client.on_callback_query(filters.regex(r"^(approve_|reject_|close_data)"))
 async def handle_all_callbacks(client, callback_query: CallbackQuery):
     data = callback_query.data
     admin_id = callback_query.from_user.id
