@@ -77,6 +77,146 @@ async def myplan(client, message):
     except Exception as e:
         print(e)
 
+# -------------------------------------------------------------------------
+# 📸 SCREENSHOT HANDLER (Direct Auto-Forward to Admin) - FIXED
+# -------------------------------------------------------------------------
+@Client.on_message(filters.photo & filters.private)
+async def payment_screenshot_handler(client, message: Message):
+    user_id = message.from_user.id
+    user_name = message.from_user.mention
+    user_note = message.caption if message.caption else "No caption provided"
+    msg = await message.reply_text("🔄 Sending payment screenshot to Admins... Please wait.")
+    
+    # ✅ FIXED: Callback data में special characters नहीं होने चाहिए
+    admin_btns = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("✅ 𝗔𝗽𝗿𝗼𝘃𝗮𝗹 (𝟭 𝗗𝗮𝘆)", callback_data=f"approve_{user_id}_1"),
+            InlineKeyboardButton("✅ 𝗔𝗽𝗿𝗼𝘃𝗮𝗹 (𝟭 𝘄𝗲𝗲𝗸)", callback_data=f"approve_{user_id}_7")
+        ],
+        [
+            InlineKeyboardButton("✅ 𝗔𝗽𝗿𝗼𝘃𝗮𝗹 (𝟭 𝗠𝗼𝗻𝘁𝗵)", callback_data=f"approve_{user_id}_30")
+        ],
+        [
+            InlineKeyboardButton("❌ 𝗥𝗲𝗷𝗲𝗰𝘁  ❌", callback_data=f"reject_{user_id}")
+        ]
+    ])
+    
+    try:
+        await client.send_photo(
+            chat_id=PREMIUM_LOGS,
+            photo=message.photo.file_id,
+            caption=f"🧾 **New Payment Screenshot**\n\n👤 User: {user_name}\n🆔 ID: <code>{user_id}</code>\n📝 Note: {user_note}",
+            reply_markup=admin_btns
+        )
+        await msg.edit_text("✅ Screenshot sent!\nAdmin will verify and activate your plan shortly.")
+    except Exception as e:
+        await msg.edit_text(f"❌ Error sending to admin: {e}")
+
+# -------------------------------------------------------------------------
+# ✅ MAIN CALLBACK HANDLER (SINGLE HANDLER FOR ALL) - FIXED
+# -------------------------------------------------------------------------
+@Client.on_callback_query()
+async def handle_all_callbacks(client, callback_query: CallbackQuery):
+    data = callback_query.data
+    admin_id = callback_query.from_user.id
+    
+    # ✅ Always answer callback first
+    await callback_query.answer()
+    
+    # Close button handler
+    if data == "close_data":
+        try:
+            await callback_query.message.delete()
+        except:
+            pass
+        return
+    
+    # ✅ Approve Payment Handler
+    if data.startswith("approve_"):
+        # Check if user is admin
+        if admin_id not in ADMINS:
+            await callback_query.answer("❌ You are not authorized!", show_alert=True)
+            return
+        
+        try:
+            parts = data.split("_")
+            if len(parts) >= 3:
+                user_id = int(parts[1])
+                days = int(parts[2])
+                
+                # Add premium access
+                new_expiry = await db.add_premium_access(user_id, days)
+                expiry_ist = new_expiry.astimezone(pytz.timezone("Asia/Kolkata"))
+                expiry_str = expiry_ist.strftime("%d-%m-%Y %I:%M %p")
+                
+                # Notify user
+                try:
+                    await client.send_message(
+                        user_id,
+                        f"🎉 <b>Payment Approved!</b>\n\n"
+                        f"💎 <b>Premium Activated</b> for {days} Days.\n"
+                        f"🗓 <b>Expiry:</b> {expiry_str}\n\n"
+                        f"<i>Enjoy Unlimited Access!</i>"
+                    )
+                except Exception as e:
+                    print(f"Could not notify user: {e}")
+                
+                # Update admin message
+                await callback_query.message.edit_caption(
+                    caption=f"✅ <b>Approved by {callback_query.from_user.mention}</b>\n\n"
+                           f"🆔 User: <code>{user_id}</code>\n"
+                           f"⏳ Added: {days} Days\n"
+                           f"📅 Expires: {expiry_str}"
+                )
+                
+                await callback_query.answer(f"✅ Approved {days} days for user {user_id}", show_alert=True)
+            else:
+                await callback_query.answer("Invalid data format!", show_alert=True)
+                
+        except Exception as e:
+            print(f"Approve error: {e}")
+            await callback_query.answer(f"Error: {str(e)}", show_alert=True)
+    
+    # ✅ Reject Payment Handler
+    elif data.startswith("reject_"):
+        # Check if user is admin
+        if admin_id not in ADMINS:
+            await callback_query.answer("❌ You are not authorized!", show_alert=True)
+            return
+        
+        try:
+            parts = data.split("_")
+            if len(parts) >= 2:
+                user_id = int(parts[1])
+                
+                # Notify user
+                try:
+                    await client.send_message(
+                        user_id,
+                        f"❌ <b>Payment Rejected.</b>\n\n"
+                        f"<i>Possible reasons:</i>\n"
+                        f"- Invalid Screenshot\n"
+                        f"- Payment not received\n"
+                        f"- Wrong Amount\n\n"
+                        f"<i>Contact Admin for support.</i>"
+                    )
+                except Exception as e:
+                    print(f"Could not notify user: {e}")
+                
+                # Update admin message
+                await callback_query.message.edit_caption(
+                    caption=f"❌ <b>Rejected by {callback_query.from_user.mention}</b>\n\n"
+                           f"🆔 User: <code>{user_id}</code>"
+                )
+                
+                await callback_query.answer(f"❌ Rejected payment for user {user_id}", show_alert=True)
+            else:
+                await callback_query.answer("Invalid data format!", show_alert=True)
+                
+        except Exception as e:
+            print(f"Reject error: {e}")
+            await callback_query.answer(f"Error: {str(e)}", show_alert=True)
+
 @Client.on_message(filters.command("get_premium") & filters.user(ADMINS))
 async def get_premium(client, message):
     if len(message.command) == 2:
