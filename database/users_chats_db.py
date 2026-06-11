@@ -197,6 +197,7 @@ class Database:
     async def get_user(self, user_id):
         user_data = await self.users.find_one({"id": user_id})
         return user_data
+    
     async def update_user(self, user_data):
         await self.users.update_one({"id": user_data["id"]}, {"$set": user_data}, upsert=True)
   
@@ -316,8 +317,17 @@ class Database:
             else:
                 await self.users.update_one({"id": user_id}, {"$set": {"expiry_time": None}})
         return False
-        
     
+    # ✅ यह नई मेथड जोड़ी गई है – Approve बटन के लिए जरूरी
+    async def add_premium_access(self, user_id: int, days: int):
+        """प्रीमियम ऐक्सेस दिनों में ऐड करें और expiry_time सेट करें"""
+        expiry_time = datetime.datetime.now(pytz.utc) + datetime.timedelta(days=days)
+        user_data = {
+            "id": user_id,
+            "expiry_time": expiry_time
+        }
+        await self.update_user(user_data)
+        return expiry_time
 
     async def update_one(self, filter_query, update_data):
         try:
@@ -462,5 +472,3 @@ class Database:
      
 db = Database(DATABASE_URI, DATABASE_NAME)    
 db2 = Database(DATABASE_URI2, DATABASE_NAME)
-
-
