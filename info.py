@@ -42,7 +42,7 @@ FSUB_PICS = (environ.get('FSUB_PICS', 'https://graph.org/file/7478ff3eac37f4329c
 # Admin, Channels & Users Configuration
 # ============================
 ADMINS = [int(admin) if id_pattern.search(admin) else admin for admin in environ.get('ADMINS', '1383239349').split()] # Replace with the actual admin ID(s) to add
-CHANNELS = [int(ch) if id_pattern.search(ch) else ch for ch in environ.get('CHANNELS', '-1001911817898').split()]  # Channel id for auto indexing (make sure bot is admin)
+CHANNELS = [int(ch) if id_pattern.search(ch) else ch for ch in environ.get('CHANNELS', '-1001911817898 +1002694399477').split()]  # Channel id for auto indexing (make sure bot is admin)
 DB_CHANNEL = -1001911817898   # ← यहाँ अपनी असली चैनल ID लिखें (जहाँ फ़ाइलें स्टोर हैं)
 
 LOG_CHANNEL = int(environ.get('LOG_CHANNEL', '-1001521000125'))  # Log channel id (make sure bot is admin)
