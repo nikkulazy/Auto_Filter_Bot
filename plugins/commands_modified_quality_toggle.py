@@ -450,25 +450,8 @@ async def start(client, message):
                         await db.increment_user_limit(message.from_user.id)
                         remaining = FILES_LIMIT - count - 1
                         await message.reply_text(f"📦 Remaining limit: {remaining}/{FILES_LIMIT}")
-            msg = await client.send_cached_media(
-                chat_id=message.from_user.id,
-                file_id=file_id,
-                protect_content=settings.get('file_secure', PROTECT_CONTENT),
-                reply_markup=InlineKeyboardMarkup(btn))
-
-            filetype = msg.media
-            file = getattr(msg, filetype.value)
-            title = clean_filename(file.file_name)
-            size=get_size(file.file_size)
-            f_caption = f"<code>{title}</code>"
-            settings = await get_settings(int(grp_id))
-            DREAMX_CAPTION = settings.get('caption', CUSTOM_FILE_CAPTION)
-            if DREAMX_CAPTION:
-                try:
-                    f_caption=DREAMX_CAPTION.format(file_name= '' if title is None else title, file_size='' if size is None else size, file_caption='')
-                except:
-                    return
-                msg = await client.send_cached_media(
+     try:
+    msg = await client.send_cached_media(
         chat_id=message.from_user.id,
         file_id=file_id,
         caption=f_caption,
@@ -485,6 +468,14 @@ async def start(client, message):
     await asyncio.sleep(DELETE_TIME)
     await msg.delete()
     await k.edit_text("<b>... deleted ...</b>")
+    
+except Exception as e:
+    print(f"Error in sending cached media: {e}")
+    await message.reply_text("⚠️ Failed to send media. Please try again.")
+    
+except Exception as e:
+    print(f"Error in sending cached media: {e}")
+    await message.reply_text("⚠️ Failed to send media. Please try again.")
     
     files = files_[0]
     # ✅ Quality restriction for single file
@@ -553,7 +544,8 @@ async def start(client, message):
                         await db.increment_user_limit(message.from_user.id)
                         remaining = FILES_LIMIT - count - 1
                         await message.reply_text(f"📦 Remaining limit: {remaining}/{FILES_LIMIT}")
-        msg = await client.send_cached_media(
+      try:
+    msg = await client.send_cached_media(
         chat_id=message.from_user.id,
         file_id=file_id,
         caption=f_caption,
@@ -570,6 +562,10 @@ async def start(client, message):
     await asyncio.sleep(DELETE_TIME)
     await msg.delete()
     await k.edit_text("<b>... deleted ...</b>")
+    
+except Exception as e:
+    print(f"Error in sending cached media: {e}")
+    await message.reply_text("⚠️ Failed to send media. Please try again.")  
 @Client.on_message(filters.command('logs') & filters.user(ADMINS))
 async def log_file(bot, message):
     """Send log file"""
