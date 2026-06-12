@@ -56,6 +56,7 @@ async def send_with_timer(client, message, file_id, caption, reply_markup, setti
     try:
         await msg.delete()
         await warn.delete()
+        await message.reply_text( "<b>ʏᴏᴜʀ ᴠɪᴅᴇᴏ / ꜰɪʟᴇ ɪꜱ ꜱᴜᴄᴄᴇꜱꜱꜰᴜʟʟʏ ᴅᴇʟᴇᴛᴇᴅ !!</b>", quote=True
     except:
         pass
     return None
@@ -89,12 +90,17 @@ async def send_with_timer_allfiles(client, message, files_list, delete_time):
     
     # Delete all files after timer ends
     try:
-        for msg in sent_messages:
-            await msg.delete()
+        await msg.delete()
         await warn.delete()
+        confirm = await message.reply_text(
+            "<b>ʏᴏᴜʀ ᴠɪᴅᴇᴏ / ꜰɪʟᴇ ɪꜱ ꜱᴜᴄᴄᴇꜱꜱꜰᴜʟʟʏ ᴅᴇʟᴇᴛᴇᴅ !!</b>",
+            quote=True
+        )
+        await asyncio.sleep(5)
+        await confirm.delete()
     except:
         pass
-    return sent_messages
+    return None
 
 @Client.on_message(filters.command("start") & filters.incoming)
 async def start(client, message):
