@@ -31,6 +31,26 @@ BATCH_FILES = {}
 # ✅ Free users ko sirf 360p & 480p quality allow
 FREE_QUALITIES = ["360p", "480p"]
 
+# Timer function for countdown warning
+async def send_with_timer(client, message, file_id, caption, reply_markup, settings, delete_time):
+    warn = await message.reply_text(f"⚠️ Deleteding Time {delete_time}s Farward quickly ⚠️", quote=True)
+    msg = await client.send_cached_media(chat_id=message.from_user.id, file_id=file_id, caption=caption, protect_content=settings.get('file_secure', PROTECT_CONTENT), reply_markup=reply_markup)
+    if delete_time <= 0:
+        return msg
+    for s in range(delete_time - 1, -1, -1):
+        try:
+            await warn.edit_text(f"⚠️ Deleteding Time {s}s Farward quickly ⚠️")
+        except:
+            pass
+        if s > 0:
+            await asyncio.sleep(1)
+    try:
+        await msg.delete()
+        await warn.delete()
+    except:
+        pass
+    return None
+
 @Client.on_message(filters.command("start") & filters.incoming)
 async def start(client, message):
     if EMOJI_MODE:
@@ -442,25 +462,27 @@ async def start(client, message):
                     f_caption=DREAMX_CAPTION.format(file_name= '' if title is None else title, file_size='' if size is None else size, file_caption='')
                 except:
                     return
-            await msg.edit_caption(
-                f_caption,
-                reply_markup=InlineKeyboardMarkup(btn)
-            )
-            k = await msg.reply(
-                f"<b><u>❗️❗️❗️IMPORTANT❗️️❗️❗️</u></b>\n\n"
-                f"ᴛʜɪꜱ ᴍᴏᴠɪᴇ ꜰɪʟᴇ/ᴠɪᴅᴇᴏ ᴡɪʟʟ ʙᴇ ᴅᴇʟᴇᴛᴇᴅ ɪɴ <b><u><code>{get_time(DELETE_TIME)}</code></u> 🫥 <i></b>"
-                "(ᴅᴜᴇ ᴛᴏ ᴄᴏᴘʏʀɪɢʜᴛ ɪꜱꜱᴜᴇꜱ)</i>.\n\n"
-                "<b><i>ᴘʟᴇᴀꜱᴇ ꜰᴏʀᴡᴀʀᴅ ᴛʜɪꜱ ꜰɪʟᴇ ᴛᴏ ꜱᴏᴍᴇᴡʜᴇʀᴇ ᴇʟꜱᴇ ᴀɴᴅ ꜱᴛᴀʀᴛ ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ ᴛʜᴇʀᴇ</i></b>",
-                quote=True
-            )
-            await asyncio.sleep(DELETE_TIME)
-            await msg.delete()
-            await k.edit_text("<b>ʏᴏᴜʀ ᴠɪᴅᴇᴏ / ꜰɪʟᴇ ɪꜱ ꜱᴜᴄᴄᴇꜱꜱꜰᴜʟʟʏ ᴅᴇʟᴇᴛᴇᴅ !! ᴋɪɴᴅʟʏ ꜱᴇᴀʀᴄʜ ᴀɢᴀɪɴ</b>")
-            return
-        except Exception as e:
-            logger.exception(e)
-            pass
-        return await message.reply('ɴᴏ ꜱᴜᴄʜ ꜰɪʟᴇ ᴇxɪꜱᴛꜱ !')
+                await send_with_timer(
+        client=client,
+        message=message,
+        file_id=file_id,
+        caption=f_caption,
+        reply_markup=InlineKeyboardMarkup(btn),
+        settings=settings,
+        delete_time=DELETE_TIME
+    )
+    
+    # Existing warning (neeche wala)
+    k = await message.reply(
+        f"<b><u>⚠️⚠️⚠️IMPORTANT⚠️⚠️⚠️</u></b>\n\n"
+        f"ᴛʜɪs ꜰɪʟᴇ/ᴠɪᴅᴇᴏ ᴡɪʟʟ ʙᴇ ᴅᴇʟᴇᴛᴇᴅ ɪɴ <b><u><code>{get_time(DELETE_TIME)}</code></u> ⚡ <i></b>"
+        "(ᴅᴜᴇ ᴛᴏ ᴄᴏᴘʏʀɪɢʜᴛ ɪꜱꜱᴜᴇ)</i>.\n\n"
+        "<b><i>ᴘʟᴇᴀsᴇ ғᴏʀᴡᴀʀᴅ ᴛʜɪs ꜰɪʟᴇ ᴛᴏ sᴀᴠᴇᴅ ᴍᴇssᴀɢᴇs ᴀɴᴅ sᴛᴀʀᴛ ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ ʜᴇʀᴇ</i></b>",
+        quote=True
+    )
+    await asyncio.sleep(DELETE_TIME)
+    await k.edit_text("<b>... deleted ...</b>")
+    return
     
     files = files_[0]
     # ✅ Quality restriction for single file
@@ -526,23 +548,26 @@ async def start(client, message):
                         await db.increment_user_limit(message.from_user.id)
                         remaining = FILES_LIMIT - count - 1
                         await message.reply_text(f"📦 Remaining limit: {remaining}/{FILES_LIMIT}")
-    msg = await client.send_cached_media(
-        chat_id=message.from_user.id,
+        await send_with_timer(
+        client=client,
+        message=message,
         file_id=file_id,
         caption=f_caption,
-        protect_content=settings.get('file_secure', PROTECT_CONTENT),
-        reply_markup=InlineKeyboardMarkup(btn)
+        reply_markup=InlineKeyboardMarkup(btn),
+        settings=settings,
+        delete_time=DELETE_TIME
     )
-    k = await msg.reply(
-        f"<b><u>❗️❗️❗️IMPORTANT❗️️❗️❗️</u></b>\n\n"
-        f"ᴛʜɪꜱ ᴍᴏᴠɪᴇ ꜰɪʟᴇ/ᴠɪᴅᴇᴏ ᴡɪʟʟ ʙᴇ ᴅᴇʟᴇᴛᴇᴅ ɪɴ <b><u><code>{get_time(DELETE_TIME)}</code></u> 🫥 <i></b>"
-        "(ᴅᴜᴇ ᴛᴏ ᴄᴏᴘʏʀɪɢʜᴛ ɪꜱꜱᴜᴇꜱ)</i>.\n\n"
-        "<b><i>ᴘʟᴇᴀꜱᴇ ꜰᴏʀᴡᴀʀᴅ ᴛʜɪꜱ ꜰɪʟᴇ ᴛᴏ ꜱᴏᴍᴇᴡʜᴇʀᴇ ᴇʟꜱᴇ ᴀɴᴅ ꜱᴛᴀʀᴛ ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ ᴛʜᴇʀᴇ</i></b>",
+    
+    # Existing warning (neeche wala)
+    k = await message.reply(
+        f"<b><u>⚠️⚠️⚠️IMPORTANT⚠️⚠️⚠️</u></b>\n\n"
+        f"ᴛʜɪs ꜰɪʟᴇ/ᴠɪᴅᴇᴏ ᴡɪʟʟ ʙᴇ ᴅᴇʟᴇᴛᴇᴅ ɪɴ <b><u><code>{get_time(DELETE_TIME)}</code></u> ⚡ <i></b>"
+        "(ᴅᴜᴇ ᴛᴏ ᴄᴏᴘʏʀɪɢʜᴛ ɪꜱꜱᴜᴇ)</i>.\n\n"
+        "<b><i>ᴘʟᴇᴀsᴇ ғᴏʀᴡᴀʀᴅ ᴛʜɪs ꜰɪʟᴇ ᴛᴏ sᴀᴠᴇᴅ ᴍᴇssᴀɢᴇs ᴀɴᴅ sᴛᴀʀᴛ ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ ʜᴇʀᴇ</i></b>",
         quote=True
-    )     
+    )
     await asyncio.sleep(DELETE_TIME)
-    await msg.delete()
-    await k.edit_text("<b>ʏᴏᴜʀ ᴠɪᴅᴇᴏ / ꜰɪʟᴇ ɪꜱ ꜱᴜᴄᴄᴇꜱꜱꜰᴜʟʟʏ ᴅᴇʟᴇᴛᴇᴅ !!</b>")
+    await k.edit_text("<b>... deleted ...</b>")
     return
 
 @Client.on_message(filters.command('logs') & filters.user(ADMINS))
