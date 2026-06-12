@@ -56,7 +56,7 @@ async def send_with_timer(client, message, file_id, caption, reply_markup, setti
     try:
         await msg.delete()
         await warn.delete()
-        await message.reply_text( "<b>ʏᴏᴜʀ ᴠɪᴅᴇᴏ / ꜰɪʟᴇ ɪꜱ ꜱᴜᴄᴄᴇꜱꜱꜰᴜʟʟʏ ᴅᴇʟᴇᴛᴇᴅ !!</b>", quote=True
+        await message.reply_text( "<b>ʏᴏᴜʀ ᴠɪᴅᴇᴏ / ꜰɪʟᴇ ɪꜱ ꜱᴜᴄᴄᴇꜱꜱꜰᴜʟʟʏ ᴅᴇʟᴇᴛᴇᴅ !!</b>", quote=True)
     except:
         pass
     return None
