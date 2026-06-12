@@ -91,7 +91,7 @@ ABOVE_PREVIEW = bool(environ.get('ABOVE_PREVIEW', True)) # Shows link preview ab
 TMDB_API_KEY = environ.get('TMDB_API_KEY', '76329e89eebf32d35850e5bc016a7fda') # preffer to use your own tmdb API Key get it from https://www.themoviedb.org/settings/api
 TMDB_POSTER = bool(environ.get('TMDB_POSTER', True)) # Shows TMDB poster in notification msg
 LANDSCAPE_POSTER = bool(environ.get('LANDSCAPE_POSTER', True)) # Shows landscape poster in notification msg
-IS_FILE_LIMIT = True 
+IS_FILE_LIMIT = False 
 FILES_LIMIT = 10          # files per day for free users
 FILE_AUTO_DEL_TIMER = 86400   # 24h reset
 
