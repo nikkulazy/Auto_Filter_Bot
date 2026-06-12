@@ -34,7 +34,7 @@ FREE_QUALITIES = ["360p", "480p"]
 # Timer function for countdown warning
 async def send_with_timer(client, message, file_id, caption, reply_markup, settings, delete_time):
     """Send file with countdown timer warning - file auto delete after time expires"""
-    warn = await message.reply_text(f"⚠️ Deleting Time {delete_time}s - Forward quickly", quote=True)
+    warn = await message.reply_text(f"⚠️ Deleted Time {delete_time}s - Forward quickly", quote=True)
     msg = await client.send_cached_media(
         chat_id=message.from_user.id, 
         file_id=file_id, 
@@ -47,7 +47,7 @@ async def send_with_timer(client, message, file_id, caption, reply_markup, setti
     # Countdown loop
     for s in range(delete_time - 1, -1, -1):
         try:
-            await warn.edit_text(f"⚠️ Deleting Time {s}s - Forward quickly ⚠️")
+            await warn.edit_text(f"⚠️ Deleted Time {s}s - Forward quickly")
         except:
             pass
         if s > 0:
@@ -63,7 +63,7 @@ async def send_with_timer(client, message, file_id, caption, reply_markup, setti
 # Timer function for multiple files (allfiles)
 async def send_with_timer_allfiles(client, message, files_list, delete_time):
     """Send multiple files with countdown timer warning - all files auto delete after time expires"""
-    warn = await message.reply_text(f"⚠️ Deleting Time {delete_time}s - Forward quickly ⚠️", quote=True)
+    warn = await message.reply_text(f"⚠️ Deleting Time {delete_time}s - Forward quickly", quote=True)
     sent_messages = []
     for file_data in files_list:
         msg = await client.send_cached_media(
@@ -81,7 +81,7 @@ async def send_with_timer_allfiles(client, message, files_list, delete_time):
     # Countdown loop
     for s in range(delete_time - 1, -1, -1):
         try:
-            await warn.edit_text(f"⚠️ All files will be deleted in {s}s - Forward quickly ⚠️")
+            await warn.edit_text(f"⚠️ Deleted Time {s}s - Forward quickly")
         except:
             pass
         if s > 0:
