@@ -91,7 +91,9 @@ async def extract_data_handler(client: Client, query: CallbackQuery):
     try:
         files_ = await get_file_details(file_id)
         if not files_:
-            await query.message.reply_text("❌ File not found in DB.", quote=True)
+            msg = await query.message.reply_text("❌ File not found in DB.", quote=True)
+            await asyncio.sleep(5)
+            await msg.delete()
             return
 
         if query.message and query.message.media:
