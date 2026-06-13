@@ -34,7 +34,7 @@ FREE_QUALITIES = ["360p", "480p"]
 # Timer function for countdown warning
 async def send_with_timer(client, message, file_id, caption, reply_markup, settings, delete_time):
     """Send file with countdown timer warning - file auto delete after time expires"""
-    warn = await message.reply_text(f"⚠️ Deleted Time {delete_time}s - Forward quickly", quote=True)
+    warn = await message.reply_text(f"⚠️ Deleted Time {delete_time}s - <a href='https://t.me/WOLVERIN_P'>Forward quickly</a>", quote=True)
     msg = await client.send_cached_media(
         chat_id=message.from_user.id, 
         file_id=file_id, 
@@ -47,7 +47,7 @@ async def send_with_timer(client, message, file_id, caption, reply_markup, setti
     # Countdown loop
     for s in range(delete_time - 1, -1, -1):
         try:
-            await warn.edit_text(f"⚠️ Deleted Time {s}s - Forward quickly")
+            await warn.edit_text(f"⚠️ Deleted Time {s}s - <a href='https://t.me/WOLVERIN_P'>Forward quickly</a>")
         except:
             pass
         if s > 0:
