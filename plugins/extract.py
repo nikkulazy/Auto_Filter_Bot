@@ -92,7 +92,7 @@ async def extract_data_handler(client: Client, query: CallbackQuery):
         files_ = await get_file_details(file_id)
         if not files_:
             msg = await query.message.reply_text("❌ File not found in DB.", quote=True)
-            await asyncio.sleep(120)
+            await asyncio.sleep(60)
             await msg.delete()
             return
 
@@ -133,7 +133,7 @@ async def extract_data_handler(client: Client, query: CallbackQuery):
                 "❌ Unable to read media information.",
                 quote=True
             )
-            await asyncio.sleep(120)
+            await asyncio.sleep(60)
             await msg.delete()
             return
         data = json.loads(result.stdout)
