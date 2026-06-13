@@ -129,10 +129,12 @@ async def extract_data_handler(client: Client, query: CallbackQuery):
             text=True
         )
         if result.returncode != 0 or not result.stdout.strip():
-            await query.message.reply_text(
+            msg = await query.message.reply_text(
                 "❌ Unable to read media information.",
                 quote=True
             )
+            await asyncio.sleep(5)
+            await msg.delete()
             return
         data = json.loads(result.stdout)
 
@@ -202,10 +204,12 @@ async def extract_data_handler(client: Client, query: CallbackQuery):
 
                 text += f"• {line}\n"
 
-        await query.message.reply_text(
+        msg = await query.message.reply_text(
             text,
             quote=True
         )
+        await asyncio.sleep(5)
+        await msg.delete()
 
         try:
             await query.edit_message_reply_markup(
@@ -216,7 +220,9 @@ async def extract_data_handler(client: Client, query: CallbackQuery):
 
     except Exception as e:
         logger.exception(e)
-        await query.message.reply_text(f"Error: {e}", quote=True)
+        msg = await query.message.reply_text(f"Error: {e}", quote=True)
+        await asyncio.sleep(5)
+        await msg.delete()
 
     finally:
         if os.path.exists(temp_path):
