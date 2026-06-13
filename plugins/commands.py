@@ -57,6 +57,8 @@ async def send_with_timer(client, message, file_id, caption, reply_markup, setti
         await msg.delete()
         await warn.delete()
         await message.reply_text( "<b>ʏᴏᴜʀ ᴠɪᴅᴇᴏ / ꜰɪʟᴇ ɪꜱ ꜱᴜᴄᴄᴇꜱꜱꜰᴜʟʟʏ ᴅᴇʟᴇᴛᴇᴅ !!\n\n𝚂𝚎𝚊𝚛𝚌𝚑 𝙰𝚐𝚊𝚒𝚗 𝙸𝚗 𝙶𝚛𝚘𝚞𝚙... !</b>", quote=True)
+        await asyncio.sleep(600)
+        await m.delete()
     except:
         pass
     return None
@@ -96,7 +98,7 @@ async def send_with_timer_allfiles(client, message, files_list, delete_time):
             "<b>ʏᴏᴜʀ ᴠɪᴅᴇᴏ / ꜰɪʟᴇ ɪꜱ ꜱᴜᴄᴄᴇꜱꜱꜰᴜʟʟʏ ᴅᴇʟᴇᴛᴇᴅ !!\n\n𝚂𝚎𝚊𝚛𝚌𝚑 𝙰𝚐𝚊𝚒𝚗 𝙸𝚗 𝙶𝚛𝚘𝚞𝚙... !</b>",
             quote=True
         )
-        await asyncio.sleep(5)
+        await asyncio.sleep(600)
         await confirm.delete()
     except:
         pass
