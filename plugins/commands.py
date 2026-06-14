@@ -33,8 +33,8 @@ FREE_QUALITIES = ["360p", "480p"]
 
 # Timer function for countdown warning
 async def send_with_timer(client, message, file_id, caption, reply_markup, settings, delete_time):
-    """Send file with countdown timer warning - file auto delete after time expires"""
-    warn = await msg.reply_text(f"⚠️ Deleted Time {delete_time}s - <a href='https://t.me/+oT8sEprrTpQ5ZGFl'>Forward quickly</a>", quote=True)
+    """Send file with countdown timer warning below - file auto delete after time expires"""
+    # पहले फाइल भेजो
     msg = await client.send_cached_media(
         chat_id=message.from_user.id, 
         file_id=file_id, 
@@ -42,52 +42,74 @@ async def send_with_timer(client, message, file_id, caption, reply_markup, setti
         protect_content=settings.get('file_secure', PROTECT_CONTENT), 
         reply_markup=reply_markup
     )
+    
     if delete_time <= 0:
         return msg
+    
+    # फाइल के नीचे टाइमर भेजो
+    warn = await msg.reply_text(
+        f"⚠️ Deleted Time {delete_time}s - <a href='https://t.me/+oT8sEprrTpQ5ZGFl'>Forward quickly</a>", 
+        quote=True
+    )
+    
     # Countdown loop
-    for s in range(delete_time - 1, -1, -1):
+    for s in range(delete_time - 1, 0, -1):
         try:
             await warn.edit_text(f"⚠️ Deleted Time {s}s - <a href='https://t.me/+oT8sEprrTpQ5ZGFl'>Forward quickly</a>")
         except:
             pass
-        if s > 0:
-            await asyncio.sleep(1)
+        await asyncio.sleep(1)
+    
     # Delete files after timer ends
     try:
         await msg.delete()
         await warn.delete()
-        await message.reply_text( "<b>ʏᴏᴜʀ ᴠɪᴅᴇᴏ / ꜰɪʟᴇ ɪꜱ ꜱᴜᴄᴄᴇꜱꜱꜰᴜʟʟʏ ᴅᴇʟᴇᴛᴇᴅ !!\n\n𝚂𝚎𝚊𝚛𝚌𝚑 𝙰𝚐𝚊𝚒𝚗 𝙸𝚗 𝙶𝚛𝚘𝚞𝚙... !</b>", quote=True)
-        await asyncio.sleep(600)
-        await m.delete()
+        await message.reply_text(
+            "<b>ʏᴏᴜʀ ᴠɪᴅᴇᴏ / ꜰɪʟᴇ ɪꜱ ꜱᴜᴄᴄᴇꜱꜱꜰᴜʟʟʏ ᴅᴇʟᴇᴛᴇᴅ !!\n\n𝚂𝚎𝚊𝚛𝚌𝚑 𝙰𝚐𝚊𝚒𝚗 𝙸𝚗 𝙶𝚛𝚘𝚞𝚙... !</b>", 
+            quote=True
+        )
     except:
         pass
     return None
 
+
 # Timer function for multiple files (allfiles)
 async def send_with_timer_allfiles(client, message, files_list, delete_time):
-    """Send multiple files with countdown timer warning - all files auto delete after time expires"""
-    warn = await sent_messages[-1].reply_text(f"⚠️ Deleting Time {delete_time}s - Forward quickly", quote=True)
+    """Send multiple files with countdown timer warning below - all files auto delete after time expires"""
     sent_messages = []
+    
+    # पहले सारी फाइल्स भेजो
     for file_data in files_list:
-        msg = await client.send_cached_media(chat_id=message.from_user.id, file_id=file_id, caption=caption, protect_content=settings.get('file_secure', PROTECT_CONTENT), reply_markup=reply_markup)
+        msg = await client.send_cached_media(
+            chat_id=message.from_user.id,
+            file_id=file_data['file_id'],
+            caption=file_data['caption'],
+            protect_content=file_data.get('protect_content', PROTECT_CONTENT),
+            reply_markup=file_data.get('reply_markup', None)
         )
         sent_messages.append(msg)
     
     if delete_time <= 0:
         return sent_messages
     
+    # आखिरी फाइल के नीचे टाइमर भेजो
+    warn = await sent_messages[-1].reply_text(
+        f"⚠️ Deleting Time {delete_time}s - Forward quickly",
+        quote=True
+    )
+    
     # Countdown loop
-    for s in range(delete_time - 1, -1, -1):
+    for s in range(delete_time - 1, 0, -1):
         try:
             await warn.edit_text(f"⚠️ Deleted Time {s}s - Forward quickly")
         except:
             pass
-        if s > 0:
-            await asyncio.sleep(1)
+        await asyncio.sleep(1)
     
     # Delete all files after timer ends
     try:
-        await msg.delete()
+        for msg in sent_messages:
+            await msg.delete()
         await warn.delete()
         confirm = await message.reply_text(
             "<b>ʏᴏᴜʀ ᴠɪᴅᴇᴏ / ꜰɪʟᴇ ɪꜱ ꜱᴜᴄᴄᴇꜱꜱꜰᴜʟʟʏ ᴅᴇʟᴇᴛᴇᴅ !!\n\n𝚂𝚎𝚊𝚛𝚌𝚑 𝙰𝚐𝚊𝚒𝚗 𝙸𝚗 𝙶𝚛𝚘𝚞𝚙... !</b>",
