@@ -66,7 +66,7 @@ async def send_with_timer(client, message, file_id, caption, reply_markup, setti
 # Timer function for multiple files (allfiles)
 async def send_with_timer_allfiles(client, message, files_list, delete_time):
     """Send multiple files with countdown timer warning - all files auto delete after time expires"""
-    warn = await message.reply_text(f"⚠️ Deleting Time {delete_time}s - Forward quickly", quote=True)
+    warn = await sent_messages[-1].reply_text(f"⚠️ Deleting Time {delete_time}s - Forward quickly", quote=True)
     sent_messages = []
     for file_data in files_list:
         msg = await client.send_cached_media(chat_id=message.from_user.id, file_id=file_id, caption=caption, protect_content=settings.get('file_secure', PROTECT_CONTENT), reply_markup=reply_markup)
