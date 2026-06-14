@@ -437,20 +437,20 @@ async def start(client, message):
                 if STREAM_MODE and not PREMIUM_STREAM_MODE:
                     btn = [
                         [InlineKeyboardButton('🚀 Sᴛʀᴇᴀᴍ Dᴏᴡɴʟᴏᴀᴅ / Wᴀᴛᴄʜ Oɴʟɪɴᴇ 🖥️', callback_data=f'generate_stream_link:{file_id_single}')],
-                        [InlineKeyboardButton('ℹ️ Pɪᴇᴅ Aᴜᴅɪᴏ & Sᴜʙs Iɴғᴏ ℹ️', callback_data=f'extract_data:{file_id_single}')],
+                        [InlineKeyboardButton('🔈𝚅𝚒𝚎𝚠 𝙰𝚞𝚍𝚒𝚘 & 𝚅𝚒𝚍𝚎𝚘 𝙸𝚗𝚏𝚘ℹ️', callback_data=f'extract_data:{file_id_single}')],
                         [InlineKeyboardButton('🔞 Jᴏɪɴ Oᴜʀ Cʜᴀɴɴᴇʟ 📌', url=UPDATE_CHNL_LNK)]
                     ]
                 elif STREAM_MODE and PREMIUM_STREAM_MODE:
                     if not await db.has_premium_access(message.from_user.id):
                         btn = [
                             [InlineKeyboardButton('🚀 Sᴛʀᴇᴀᴍ Dᴏᴡɴʟᴏᴀᴅ / Wᴀᴛᴄʜ Oɴʟɪɴᴇ 🖥️', callback_data=f'prestream')],
-                            [InlineKeyboardButton('ℹ️ Pɪᴇᴅ Aᴜᴅɪᴏ & Sᴜʙs Iɴғᴏ ℹ️', callback_data=f'prestream')],
+                            [InlineKeyboardButton('🔈𝚅𝚒𝚎𝚠 𝙰𝚞𝚍𝚒𝚘 & 𝚅𝚒𝚍𝚎𝚘 𝙸𝚗𝚏𝚘ℹ️', callback_data=f'prestream')],
                             [InlineKeyboardButton('🔞 Jᴏɪɴ Oᴜʀ Cʜᴀɴɴᴇʟ 📌', url=UPDATE_CHNL_LNK)]
                         ]
                     else:
                         btn = [
                             [InlineKeyboardButton('🚀 Sᴛʀᴇᴀᴍ Dᴏᴡɴʟᴏᴀᴅ / Wᴀᴛᴄʜ Oɴʟɪɴᴇ 🖥️', callback_data=f'generate_stream_link:{file_id_single}')],
-                            [InlineKeyboardButton('ℹ️ Pɪᴇᴅ Aᴜᴅɪᴏ & Sᴜʙs Iɴғᴏ ℹ️', callback_data=f'extract_data:{file_id_single}')],
+                            [InlineKeyboardButton('🔈𝚅𝚒𝚎𝚠 𝙰𝚞𝚍𝚒𝚘 & 𝚅𝚒𝚍𝚎𝚘 𝙸𝚗𝚏𝚘ℹ️', callback_data=f'extract_data:{file_id_single}')],
                             [InlineKeyboardButton('🔞 Jᴏɪɴ Oᴜʀ Cʜᴀɴɴᴇʟ 📌', url=UPDATE_CHNL_LNK)]
                         ]
                 else:
@@ -496,20 +496,20 @@ async def start(client, message):
             if STREAM_MODE and not PREMIUM_STREAM_MODE:
                 btn = [
                     [InlineKeyboardButton('🚀 Sᴛʀᴇᴀᴍ Dᴏᴡɴʟᴏᴀᴅ / Wᴀᴛᴄʜ Oɴʟɪɴᴇ 🖥️', callback_data=f'generate_stream_link:{file_id}')],
-                    [InlineKeyboardButton('ℹ️ Pɪᴇᴅ Aᴜᴅɪᴏ & Sᴜʙs Iɴғᴏ ℹ️', callback_data=f'extract_data:{file_id}')],
+                    [InlineKeyboardButton('🔈𝚅𝚒𝚎𝚠 𝙰𝚞𝚍𝚒𝚘 & 𝚅𝚒𝚍𝚎𝚘 𝙸𝚗𝚏𝚘ℹ️', callback_data=f'extract_data:{file_id}')],
                     [InlineKeyboardButton('🔞 Jᴏɪɴ Oᴜʀ Cʜᴀɴɴᴇʟ 📌', url=UPDATE_CHNL_LNK)]
                 ]
             elif STREAM_MODE and PREMIUM_STREAM_MODE:
                 if not await db.has_premium_access(message.from_user.id):
                    btn = [
                         [InlineKeyboardButton('🚀 Sᴛʀᴇᴀᴍ Dᴏᴡɴʟᴏᴀᴅ / Wᴀᴛᴄʜ Oɴʟɪɴᴇ 🖥️', callback_data=f'prestream')],
-                        [InlineKeyboardButton('ℹ️ Pɪᴇᴅ Aᴜᴅɪᴏ & Sᴜʙs Iɴғᴏ ℹ️', callback_data=f'prestream')],
+                        [InlineKeyboardButton('🔈𝚅𝚒𝚎𝚠 𝙰𝚞𝚍𝚒𝚘 & 𝚅𝚒𝚍𝚎𝚘 𝙸𝚗𝚏𝚘ℹ️', callback_data=f'prestream')],
                         [InlineKeyboardButton('🔞 Jᴏɪɴ Oᴜʀ Cʜᴀɴɴᴇʟ 📌', url=UPDATE_CHNL_LNK)]
                     ]
                 else:
                     btn = [
                         [InlineKeyboardButton('🚀 Sᴛʀᴇᴀᴍ Dᴏᴡɴʟᴏᴀᴅ / Wᴀᴛᴄʜ Oɴʟɪɴᴇ 🖥️', callback_data=f'generate_stream_link:{file_id}')],
-                        [InlineKeyboardButton('ℹ️ Pɪᴇᴅ Aᴜᴅɪᴏ & Sᴜʙs Iɴғᴏ ℹ️', callback_data=f'extract_data:{file_id}')],
+                        [InlineKeyboardButton('🔈𝚅𝚒𝚎𝚠 𝙰𝚞𝚍𝚒𝚘 & 𝚅𝚒𝚍𝚎𝚘 𝙸𝚗𝚏𝚘ℹ️', callback_data=f'extract_data:{file_id}')],
                         [InlineKeyboardButton('🔞 Jᴏɪɴ Oᴜʀ Cʜᴀɴɴᴇʟ 📌', url=UPDATE_CHNL_LNK)]
                     ]
             else:
@@ -567,20 +567,20 @@ async def start(client, message):
     if STREAM_MODE and not PREMIUM_STREAM_MODE:
         btn = [
             [InlineKeyboardButton('🚀 Sᴛʀᴇᴀᴍ Dᴏᴡɴʟᴏᴀᴅ / Wᴀᴛᴄʜ Oɴʟɪɴᴇ 🖥️', callback_data=f'generate_stream_link:{file_id}')],
-            [InlineKeyboardButton('ℹ️ Pɪᴇᴅ Aᴜᴅɪᴏ & Sᴜʙs Iɴғᴏ ℹ️', callback_data=f'extract_data:{file_id}')],
+            [InlineKeyboardButton('🔈𝚅𝚒𝚎𝚠 𝙰𝚞𝚍𝚒𝚘 & 𝚅𝚒𝚍𝚎𝚘 𝙸𝚗𝚏𝚘ℹ️', callback_data=f'extract_data:{file_id}')],
             [InlineKeyboardButton('🔞 Jᴏɪɴ Oᴜʀ Cʜᴀɴɴᴇʟ 📌', url=UPDATE_CHNL_LNK)]
         ]
     elif STREAM_MODE and PREMIUM_STREAM_MODE:
         if not await db.has_premium_access(message.from_user.id):
             btn = [
                 [InlineKeyboardButton('🚀 Sᴛʀᴇᴀᴍ Dᴏᴡɴʟᴏᴀᴅ / Wᴀᴛᴄʜ Oɴʟɪɴᴇ 🖥️', callback_data=f'prestream')],
-                [InlineKeyboardButton('ℹ️ Pɪᴇᴅ Aᴜᴅɪᴏ & Sᴜʙs Iɴғᴏ ℹ️', callback_data=f'prestream')],
+                [InlineKeyboardButton('🔈𝚅𝚒𝚎𝚠 𝙰𝚞𝚍𝚒𝚘 & 𝚅𝚒𝚍𝚎𝚘 𝙸𝚗𝚏𝚘ℹ️', callback_data=f'prestream')],
                 [InlineKeyboardButton('🔞 Jᴏɪɴ Oᴜʀ Cʜᴀɴɴᴇʟ 📌', url=UPDATE_CHNL_LNK)]
             ]
         else:
             btn = [
                 [InlineKeyboardButton('🚀 Sᴛʀᴇᴀᴍ Dᴏᴡɴʟᴏᴀᴅ / Wᴀᴛᴄʜ Oɴʟɪɴᴇ 🖥️', callback_data=f'generate_stream_link:{file_id}')],
-                [InlineKeyboardButton('ℹ️ Pɪᴇᴅ Aᴜᴅɪᴏ & Sᴜʙs Iɴғᴏ ℹ️', callback_data=f'extract_data:{file_id}')],
+                [InlineKeyboardButton('🔈𝚅𝚒𝚎𝚠 𝙰𝚞𝚍𝚒𝚘 & 𝚅𝚒𝚍𝚎𝚘 𝙸𝚗𝚏𝚘ℹ️', callback_data=f'extract_data:{file_id}')],
                 [InlineKeyboardButton('🔞 Jᴏɪɴ Oᴜʀ Cʜᴀɴɴᴇʟ 📌', url=UPDATE_CHNL_LNK)]
             ]
     else:
