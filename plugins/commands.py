@@ -48,14 +48,14 @@ async def send_with_timer(client, message, file_id, caption, reply_markup, setti
     
     # फाइल के नीचे टाइमर भेजो
     warn = await msg.reply_text(
-        f"⚠️ Deleted Time {delete_time}s - <a href='https://t.me/+oT8sEprrTpQ5ZGFl'>Forward quickly</a>", 
+        f"⚠️ Deleted Time {delete_time}s - <a href='https://t.me/Savefilevideo/1452'>Forward quickly</a>", 
         quote=True
     )
     
     # Countdown loop
     for s in range(delete_time - 1, 0, -1):
         try:
-            await warn.edit_text(f"⚠️ Deleted Time {s}s - <a href='https://t.me/+oT8sEprrTpQ5ZGFl'>Forward quickly</a>")
+            await warn.edit_text(f"⚠️ Deleted Time {s}s - <a href='https://t.me/Savefilevideo/1452'>Forward quickly</a>")
         except:
             pass
         await asyncio.sleep(1)
