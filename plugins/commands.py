@@ -68,6 +68,8 @@ async def send_with_timer(client, message, file_id, caption, reply_markup, setti
             "<b>ʏᴏᴜʀ ᴠɪᴅᴇᴏ / ꜰɪʟᴇ ɪꜱ ꜱᴜᴄᴄᴇꜱꜱꜰᴜʟʟʏ ᴅᴇʟᴇᴛᴇᴅ !!\n\n𝚂𝚎𝚊𝚛𝚌𝚑 𝙰𝚐𝚊𝚒𝚗 𝙸𝚗 𝙶𝚛𝚘𝚞𝚙... !</b>", 
             quote=True
         )
+        await asyncio.sleep(600)
+        await confirm.delete()
     except:
         pass
     return None
