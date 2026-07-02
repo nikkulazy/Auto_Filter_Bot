@@ -1566,3 +1566,97 @@ async def reset_trial(client, message):
         await message.reply_text(message_text)
     except Exception as e:
         await message.reply_text(f"An error occurred: {e}")
+
+#music download handle========================
+@Client.on_message(filters.command("song") & filters.incoming)
+async def song_download(client, message):
+    """YouTube se song download karein"""
+    if len(message.command) < 2:
+        await message.reply_text(
+            "🎵 **Kripya song ka naam likhein!**\n\n"
+            "Usage: `/song song_name`\n"
+            "Example: `/song Believer Imagine Dragons`"
+        )
+        return
+    
+    song_name = " ".join(message.command[1:])
+    status_msg = await message.reply_text(f"🔍 `{song_name}` dhoond raha hoon...")
+    
+    try:
+        import yt_dlp
+        
+        ydl_opts = {
+            'format': 'bestaudio/best',
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'mp3',
+                'preferredquality': '192',
+            }],
+            'quiet': True,
+            'no_warnings': True,
+            'extractaudio': True,
+            'outtmpl': 'downloads/%(title)s.%(ext)s',
+            'default_search': 'ytsearch5',
+        }
+        
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(f"ytsearch:{song_name}", download=True)
+            
+            if not info or 'entries' not in info:
+                await status_msg.edit_text("❌ Koi song nahi mila! Dobara try karein.")
+                return
+            
+            video = info['entries'][0]
+            title = video.get('title', song_name)
+            duration = video.get('duration', 0)
+            uploader = video.get('uploader', 'Unknown')
+            
+            import glob
+            files = glob.glob("downloads/*.mp3")
+            if not files:
+                await status_msg.edit_text("❌ Download fail ho gaya. Dobara try karein.")
+                return
+            
+            audio_file = files[0]
+            
+            duration_min = duration // 60
+            duration_sec = duration % 60
+            
+            caption = f"""🎵 **{title}**
+
+⏱️ Duration: `{duration_min}m {duration_sec}s`
+👤 Uploader: `{uploader}`
+
+🎶 **Enjoy the music!** 🎶
+"""
+            
+            await status_msg.delete()
+            
+            await client.send_audio(
+                chat_id=message.chat.id,
+                audio=audio_file,
+                caption=caption,
+                title=title,
+                performer=uploader,
+                duration=duration,
+                reply_to_message_id=message.id
+            )
+            
+            import os
+            try:
+                os.remove(audio_file)
+            except:
+                pass
+                
+    except ImportError:
+        await status_msg.edit_text(
+            "❌ **yt-dlp install nahi hai!**\n\n"
+            "Install karein:\n"
+            "`pip install yt-dlp`"
+        )
+        return
+        
+    except Exception as e:
+        await status_msg.edit_text(f"❌ Error: `{str(e)[:200]}`")
+        logging.error(f"Song download error: {e}")
+        return
