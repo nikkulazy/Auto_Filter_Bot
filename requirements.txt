@@ -34,6 +34,7 @@ pyromod
 colorama
 fuzzywuzzy
 Levenshtein==0.24.0
+pip install yt-dlp
 
 # Git-based Packages
 git+https://github.com/DreamXBotz/cinemagoer
