@@ -1,25 +1,23 @@
-FROM python:3.12.2
+FROM nikolaik/python-nodejs:python3.10-nodejs19
 
-# System dependencies
-RUN apt-get update && \
+RUN sed -i 's|http://deb.debian.org/debian|http://archive.debian.org/debian|g' /etc/apt/sources.list && \
+    sed -i '/security.debian.org/d' /etc/apt/sources.list && \
+    apt-get update && \
     apt-get install -y --no-install-recommends \
-    git \
     ffmpeg \
+    aria2 \
+    ca-certificates \
     && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && update-ca-certificates
 
-WORKDIR /DreamxBotz
+COPY . /app/
+WORKDIR /app/
 
-# Copy requirements first (better caching)
-COPY requirements.txt .
+COPY cookies.txt /app/cookies.txt
 
-# Install Python packages
-RUN pip install --no-cache-dir --upgrade pip --root-user-action=ignore && \
-    pip install --no-cache-dir -r requirements.txt --root-user-action=ignore && \
-    pip install --no-cache-dir yt-dlp --root-user-action=ignore
+RUN python -m pip install --no-cache-dir --upgrade pip
+RUN pip3 install --no-cache-dir --upgrade --requirement requirements.txt
+RUN pip3 install --no-cache-dir yt-dlp certifi
 
-# Copy bot code
-COPY . .
-
-# Start bot
 CMD ["python3", "bot.py"]
