@@ -1568,14 +1568,15 @@ async def reset_trial(client, message):
         await message.reply_text(f"An error occurred: {e}")
 
 #music download handle========================
+# ✅ Sahi Code
 @Client.on_message(filters.command("song") & filters.incoming)
 async def song_download(client, message):
-    """YouTube se song download karein"""
+    """YouTube se MP3 song download karein"""
     if len(message.command) < 2:
         await message.reply_text(
             "🎵 **Kripya song ka naam likhein!**\n\n"
             "Usage: `/song song_name`\n"
-            "Example: `/song Believer Imagine Dragons`"
+            "Example: `/song Tum Hi Ho`"
         )
         return
     
@@ -1583,29 +1584,32 @@ async def song_download(client, message):
     status_msg = await message.reply_text(f"🔍 `{song_name}` dhoond raha hoon...")
     
     try:
+        import yt_dlp
+        import os
+        import glob
         
-        ᚐ⎯‌꯭꯭🔥꯭ ⃪꯭ ꯭꯭❍꯭ϝ꯭ϝ꯭ℓ𝛊꯭η꯭є ꯭ 𝐃꯭ꭎ᰻⃪꯭᱂꯭ɢє꯭፝֠֩᷍sʜ꯭⟶᯦꯭꯭꯭͟͟͟🇮🇳꯭:
-ydl_opts = {
-    # Yahan apna proxy URL daalein
-    'proxy': '16.62.123.236', 
-    'format': 'bestaudio/best',
-    'postprocessors': [{
-        'key': 'FFmpegExtractAudio',
-        'preferredcodec': 'mp3',
-        'preferredquality': '192',
-    }],
-    'quiet': True,
-    'no_warnings': True,
-    'extractaudio': True,
-    'outtmpl': 'downloads/%(title)s.%(ext)s',
-    'default_search': 'ytsearch5',
-}
-
-with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-    info = ydl.extract_info(f"ytsearch:{song_name}", download=True)
-          
+        os.makedirs("downloads", exist_ok=True)
+        
+        ydl_opts = {
+            'format': 'bestaudio/best',
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'mp3',
+                'preferredquality': '192',
+            }],
+            'quiet': True,
+            'no_warnings': True,
+            'extractaudio': True,
+            'outtmpl': 'downloads/%(title)s.%(ext)s',
+            'default_search': 'ytsearch5',
+            'cookiefile': 'cookies.txt',
+        }
+        
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(f"ytsearch:{song_name}", download=True)
+            
             if not info or 'entries' not in info:
-                await status_msg.edit_text("❌ Koi song nahi mila! Dobara try karein.")
+                await status_msg.edit_text("❌ Koi song nahi mila!")
                 return
             
             video = info['entries'][0]
@@ -1613,14 +1617,12 @@ with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             duration = video.get('duration', 0)
             uploader = video.get('uploader', 'Unknown')
             
-            import glob
             files = glob.glob("downloads/*.mp3")
             if not files:
-                await status_msg.edit_text("❌ Download fail ho gaya. Dobara try karein.")
+                await status_msg.edit_text("❌ Download fail ho gaya!")
                 return
             
             audio_file = files[0]
-            
             duration_min = duration // 60
             duration_sec = duration % 60
             
@@ -1644,7 +1646,6 @@ with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 reply_to_message_id=message.id
             )
             
-            import os
             try:
                 os.remove(audio_file)
             except:
@@ -1653,12 +1654,21 @@ with yt_dlp.YoutubeDL(ydl_opts) as ydl:
     except ImportError:
         await status_msg.edit_text(
             "❌ **yt-dlp install nahi hai!**\n\n"
-            "Install karein:\n"
-            "`pip install yt-dlp`"
+            "Install karein: `pip install yt-dlp`"
         )
         return
         
     except Exception as e:
-        await status_msg.edit_text(f"❌ Error: `{str(e)[:200]}`")
+        error_msg = str(e)
+        if "Sign in to confirm" in error_msg:
+            await status_msg.edit_text(
+                "❌ **YouTube Login Required!**\n\n"
+                "Cookies file chahiye.\n"
+                "1. Chrome extension 'Get cookies.txt LOCALLY' install karein\n"
+                "2. YouTube pe login karein\n"
+                "3. Export karein aur 'cookies.txt' file bot folder mein rakhein"
+            )
+        else:
+            await status_msg.edit_text(f"❌ Error: `{error_msg[:200]}`")
         logging.error(f"Song download error: {e}")
         return
