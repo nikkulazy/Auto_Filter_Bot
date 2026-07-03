@@ -1583,25 +1583,27 @@ async def song_download(client, message):
     status_msg = await message.reply_text(f"🔍 `{song_name}` dhoond raha hoon...")
     
     try:
-        import yt_dlp
         
-        ydl_opts = {
-            'format': 'bestaudio/best',
-            'postprocessors': [{
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'mp3',
-                'preferredquality': '192',
-            }],
-            'quiet': True,
-            'no_warnings': True,
-            'extractaudio': True,
-            'outtmpl': 'downloads/%(title)s.%(ext)s',
-            'default_search': 'ytsearch5',
-        }
-        
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(f"ytsearch:{song_name}", download=True)
-            
+        ᚐ⎯‌꯭꯭🔥꯭ ⃪꯭ ꯭꯭❍꯭ϝ꯭ϝ꯭ℓ𝛊꯭η꯭є ꯭ 𝐃꯭ꭎ᰻⃪꯭᱂꯭ɢє꯭፝֠֩᷍sʜ꯭⟶᯦꯭꯭꯭͟͟͟🇮🇳꯭:
+ydl_opts = {
+    # Yahan apna proxy URL daalein
+    'proxy': '16.62.123.236', 
+    'format': 'bestaudio/best',
+    'postprocessors': [{
+        'key': 'FFmpegExtractAudio',
+        'preferredcodec': 'mp3',
+        'preferredquality': '192',
+    }],
+    'quiet': True,
+    'no_warnings': True,
+    'extractaudio': True,
+    'outtmpl': 'downloads/%(title)s.%(ext)s',
+    'default_search': 'ytsearch5',
+}
+
+with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+    info = ydl.extract_info(f"ytsearch:{song_name}", download=True)
+          
             if not info or 'entries' not in info:
                 await status_msg.edit_text("❌ Koi song nahi mila! Dobara try karein.")
                 return
