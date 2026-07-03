@@ -1591,6 +1591,7 @@ async def song_download(client, message):
         os.makedirs("downloads", exist_ok=True)
         
         ydl_opts = {
+            'proxy': '16.62.123.236',
             'format': 'bestaudio/best',
             'postprocessors': [{
                 'key': 'FFmpegExtractAudio',
