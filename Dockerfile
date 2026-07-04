@@ -14,7 +14,6 @@ RUN sed -i 's|http://deb.debian.org/debian|http://archive.debian.org/debian|g' /
 COPY . /app/
 WORKDIR /app/
 
-COPY cookies.txt /app/cookies.txt
 
 RUN python -m pip install --no-cache-dir --upgrade pip
 RUN pip3 install --no-cache-dir --upgrade --requirement requirements.txt
