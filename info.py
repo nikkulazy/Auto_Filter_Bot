@@ -163,6 +163,23 @@ STREAM_MODE = bool(environ.get('STREAM_MODE', True)) # Set Stream mode True or F
 PREMIUM_STREAM_MODE = bool(environ.get('PREMIUM_STREAM_MODE', True)) # Set Stream mode True or False only for premium users
 QUALITY_LIMIT = False 
 
+QUALITY_UPGRADE_ENABLED = True  
+
+BAD_QUALITY_KEYWORDS = [
+    'camrip', 'cam-rip', 'cam', 'hdcam', 'hdtc', 'tc', 'ts', 
+    'telesync', 'hdts', 'hd-tc', 'cam-ts',
+    'dvdscr', 'predvd',
+    'hall dubbing', 'theatre dubbing', 'cinema dubbing',
+    'theatre', 'cinema', 'hall', 'print',
+    'hdprint', 'screen', 'recorded', 'capture'
+]
+
+GOOD_QUALITY_KEYWORDS = [
+    'webdl', 'web-dl', 'webrip', 'web-rip', 'web',
+    'bluray', 'brrip', 'bdrip', 'blu-ray',
+    'hdr', 'dolby', 'atmos', 'truehd', 'dts-hd',
+    'remux', 'uhd'
+]
 # ============================
 # Bot Configuration
 # ============================
