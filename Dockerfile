@@ -3,9 +3,9 @@ FROM python:3.12.2
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     git \
-    ffmpeg \          # ← ADD THIS LINE
-    && apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+    ffmpeg \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /DreamxBotz
 
