@@ -3,140 +3,80 @@ from struct import pack
 import re
 import base64
 from pyrogram.file_id import FileId
-from typing import Dict, List, Optional, Tuple, Set
-from collections import defaultdict, Counter
-from pymongo.errors import DuplicateKeyError
+from typing import Dict, List, Optional, Tuple
+from collections import defaultdict
+from pymongo.errors import DuplicateKeyError, OperationFailure
 from umongo import Instance, Document, fields
 from motor.motor_asyncio import AsyncIOMotorClient
 from marshmallow import ValidationError
 from info import *
 from utils import get_settings, save_group_settings
 from datetime import datetime, timedelta
-import asyncio
-from fuzzywuzzy import fuzz, process
-import Levenshtein
+from fuzzywuzzy import fuzz
 from cachetools import TTLCache
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-# ---------------------------------------------------------
-# Advanced Caching System
-_db_stats_cache = {"timestamp": None, "primary_size": 0.0}
-_search_cache = TTLCache(maxsize=1000, ttl=300)  # Cache search results for 5 minutes
-_suggestion_cache = TTLCache(maxsize=500, ttl=600)  # Cache suggestions for 10 minutes
+# ═══════════════════════════════════════════════════════════
+#  CACHE SETUP
+# ═══════════════════════════════════════════════════════════
 
-# Primary DB
+_db_stats_cache = {"timestamp": None, "primary_size": 0.0}
+_search_cache = TTLCache(maxsize=1000, ttl=300)
+_suggestion_cache = TTLCache(maxsize=500, ttl=600)
+
+# ═══════════════════════════════════════════════════════════
+#  DATABASE CONNECTIONS
+# ═══════════════════════════════════════════════════════════
+
 client = AsyncIOMotorClient(DATABASE_URI)
 db = client[DATABASE_NAME]
 instance = Instance.from_db(db)
 
-# Secondary DB
-client2 = AsyncIOMotorClient(DATABASE_URI2)
-db2 = client2[DATABASE_NAME]
-instance2 = Instance.from_db(db2)
+if MULTIPLE_DB:
+    client2 = AsyncIOMotorClient(DATABASE_URI2)
+    db2 = client2[DATABASE_NAME]
+    instance2 = Instance.from_db(db2)
 
-
-@instance.register
-class Media(Document):
-    file_id = fields.StrField(attribute="_id")
-    file_ref = fields.StrField(allow_none=True)
-    file_name = fields.StrField(required=True)
-    file_size = fields.IntField(required=True)
-    file_type = fields.StrField(allow_none=True)
-    mime_type = fields.StrField(allow_none=True)
-    caption = fields.StrField(allow_none=True)
-    # New fields for better search
-    search_terms = fields.ListField(fields.StrField(), default=[])
-    normalized_name = fields.StrField(allow_none=True)
-    keywords = fields.ListField(fields.StrField(), default=[])
-    year = fields.IntField(allow_none=True)
-    language = fields.StrField(allow_none=True)
-    quality = fields.StrField(allow_none=True)
-    added_date = fields.DateTimeField(default=datetime.utcnow)
-
-    class Meta:
-        indexes = (
-            "$file_name",
-            "$search_terms",
-            "$keywords",
-            "$normalized_name",
-            ("file_type", "year"),
-        )
-        collection_name = COLLECTION_NAME
-
-
-@instance2.register
-class Media2(Document):
-    file_id = fields.StrField(attribute="_id")
-    file_ref = fields.StrField(allow_none=True)
-    file_name = fields.StrField(required=True)
-    file_size = fields.IntField(required=True)
-    file_type = fields.StrField(allow_none=True)
-    mime_type = fields.StrField(allow_none=True)
-    caption = fields.StrField(allow_none=True)
-    search_terms = fields.ListField(fields.StrField(), default=[])
-    normalized_name = fields.StrField(allow_none=True)
-    keywords = fields.ListField(fields.StrField(), default=[])
-    year = fields.IntField(allow_none=True)
-    language = fields.StrField(allow_none=True)
-    quality = fields.StrField(allow_none=True)
-    added_date = fields.DateTimeField(default=datetime.utcnow)
-
-    class Meta:
-        indexes = (
-            "$file_name",
-            "$search_terms",
-            "$keywords",
-            "$normalized_name",
-            ("file_type", "year"),
-        )
-        collection_name = COLLECTION_NAME
-
-
-# ========== ADVANCED TEXT PROCESSING ==========
+# ═══════════════════════════════════════════════════════════
+#  TEXT PROCESSOR - स्मार्ट टेक्स्ट प्रोसेसिंग
+# ═══════════════════════════════════════════════════════════
 
 class TextProcessor:
-    """Advanced text processing for better search and suggestions"""
+    """फाइल नाम से मेटाडेटा निकालने के लिए"""
     
     @staticmethod
     def clean_text(text: str) -> str:
-        """Clean and normalize text for search"""
+        """टेक्स्ट को साफ करो"""
         if not text:
             return ""
-        # Remove special characters but keep important ones
         text = re.sub(r'[^\w\s\-\.\(\)\[\]]', ' ', text)
         text = re.sub(r'\s+', ' ', text).strip()
         return text.lower()
     
     @staticmethod
     def extract_keywords(text: str) -> List[str]:
-        """Extract meaningful keywords from text"""
+        """कीवर्ड्स निकालो"""
         if not text:
             return []
-        # Common stopwords to ignore
         stopwords = {'the', 'a', 'an', 'of', 'for', 'on', 'at', 'to', 'in', 'with', 
                     'without', 'and', 'or', 'but', 'by', 'from', 'into', 'through',
                     'during', 'including', 'etc', 'feat', 'ft', 'hindi', 'english',
                     'dubbed', 'sub', 'uncut', 'full', 'movie', 'series', 'episode'}
-        
-        # Extract words and filter
         words = re.findall(r'\b[a-zA-Z0-9]{2,}\b', text.lower())
-        keywords = [w for w in words if w not in stopwords]
-        return list(set(keywords))  # Remove duplicates
+        return list(set([w for w in words if w not in stopwords]))
     
     @staticmethod
     def extract_year(text: str) -> Optional[int]:
-        """Extract year from text"""
-        year_match = re.search(r'\b(19|20)\d{2}\b', text)
-        if year_match:
-            return int(year_match.group())
-        return None
+        """साल निकालो"""
+        match = re.search(r'\b(19|20)\d{2}\b', text)
+        return int(match.group()) if match else None
     
     @staticmethod
     def extract_quality(text: str) -> Optional[str]:
-        """Extract quality from text"""
-        quality_patterns = {
+        """क्वालिटी निकालो"""
+        patterns = {
             '4k': r'\b4[Kk]\b',
             '2160p': r'\b2160p\b',
             '1080p': r'\b1080p\b',
@@ -149,14 +89,14 @@ class TextProcessor:
             'web': r'\bWEB[ -]?DL\b',
             'dvd': r'\bDVD\b',
         }
-        for quality, pattern in quality_patterns.items():
+        for quality, pattern in patterns.items():
             if re.search(pattern, text, re.IGNORECASE):
                 return quality
         return None
     
     @staticmethod
     def extract_language(text: str) -> Optional[str]:
-        """Extract language from text"""
+        """भाषा निकालो"""
         languages = {
             'hindi': r'\bHindi\b',
             'tamil': r'\bTamil\b',
@@ -175,26 +115,163 @@ class TextProcessor:
     
     @staticmethod
     def normalize_title(text: str) -> str:
-        """Normalize title for better matching"""
+        """टाइटल को नॉर्मल करो"""
         if not text:
             return ""
-        # Remove common patterns
-        text = re.sub(r'\(?\d{4}\)?', '', text)  # Remove years
-        text = re.sub(r'[Ss]\d{1,2}[Ee]\d{1,2}', '', text)  # Remove season/episode
-        text = re.sub(r'[\(\{\[]?[^\)\}\]]*[\)\}\]]', '', text)  # Remove parentheses content
+        text = re.sub(r'\(?\d{4}\)?', '', text)
+        text = re.sub(r'[Ss]\d{1,2}[Ee]\d{1,2}', '', text)
+        text = re.sub(r'[\(\{\[]?[^\)\}\]]*[\)\}\]]', '', text)
         text = re.sub(r'[_\-\+\=\[\]]', ' ', text)
         text = re.sub(r'\s+', ' ', text).strip()
         return text.lower()
 
+# ═══════════════════════════════════════════════════════════
+#  DOCUMENT CLASSES - बिना indexes के (हम अलग से बनाएंगे)
+# ═══════════════════════════════════════════════════════════
 
-# ========== ENHANCED SEARCH FUNCTIONS ==========
+@instance.register
+class Media(Document):
+    file_id = fields.StrField(attribute="_id")
+    file_ref = fields.StrField(allow_none=True)
+    file_name = fields.StrField(required=True)
+    file_size = fields.IntField(required=True)
+    file_type = fields.StrField(allow_none=True)
+    mime_type = fields.StrField(allow_none=True)
+    caption = fields.StrField(allow_none=True)
+    # नए फील्ड्स
+    search_terms = fields.ListField(fields.StrField(), default=[])
+    normalized_name = fields.StrField(allow_none=True)
+    keywords = fields.ListField(fields.StrField(), default=[])
+    year = fields.IntField(allow_none=True)
+    language = fields.StrField(allow_none=True)
+    quality = fields.StrField(allow_none=True)
+    added_date = fields.DateTimeField(default=datetime.utcnow)
+
+    class Meta:
+        # ⚠️ यहाँ indexes मत डालो - हम अलग से बनाएंगे
+        collection_name = COLLECTION_NAME
+
+if MULTIPLE_DB:
+    @instance2.register
+    class Media2(Document):
+        file_id = fields.StrField(attribute="_id")
+        file_ref = fields.StrField(allow_none=True)
+        file_name = fields.StrField(required=True)
+        file_size = fields.IntField(required=True)
+        file_type = fields.StrField(allow_none=True)
+        mime_type = fields.StrField(allow_none=True)
+        caption = fields.StrField(allow_none=True)
+        search_terms = fields.ListField(fields.StrField(), default=[])
+        normalized_name = fields.StrField(allow_none=True)
+        keywords = fields.ListField(fields.StrField(), default=[])
+        year = fields.IntField(allow_none=True)
+        language = fields.StrField(allow_none=True)
+        quality = fields.StrField(allow_none=True)
+        added_date = fields.DateTimeField(default=datetime.utcnow)
+
+        class Meta:
+            collection_name = COLLECTION_NAME
+
+# ═══════════════════════════════════════════════════════════
+#  INDEXES - एक बार बनाओ, फिर कभी मत बनाओ
+# ═══════════════════════════════════════════════════════════
+
+INDEXES_CREATED = False
+
+async def create_indexes_once():
+    """सिर्फ एक बार indexes बनाओ - बस एक बार!"""
+    global INDEXES_CREATED
+    
+    if INDEXES_CREATED:
+        logger.info("✅ Indexes पहले ही बन चुके हैं")
+        return True
+    
+    try:
+        logger.info("🔄 Indexes बनाना शुरू...")
+        
+        # पुराने indexes हटाओ
+        for index_name in ["file_name_text", "search_terms_text", "file_name_1"]:
+            try:
+                await Media.collection.drop_index(index_name)
+                logger.info(f"✅ Index हटाया: {index_name}")
+            except:
+                pass
+        
+        # नए indexes बनाओ
+        await Media.collection.create_index([("file_name", "text")])  # ✅ ये रखो
+        await Media.collection.create_index([("search_terms", 1)])
+        await Media.collection.create_index([("year", 1), ("file_type", 1)])
+        await Media.collection.create_index([("language", 1), ("file_type", 1)])
+        await Media.collection.create_index([("quality", 1), ("file_type", 1)])
+        await Media.collection.create_index([("added_date", -1)])
+        await Media.collection.create_index([("keywords", 1)])
+        await Media.collection.create_index([("normalized_name", 1)])
+        await Media.collection.create_index([("file_id", 1)])
+        
+        if MULTIPLE_DB:
+            for index_name in ["file_name_text", "search_terms_text", "file_name_1"]:
+                try:
+                    await Media2.collection.drop_index(index_name)
+                except:
+                    pass
+            
+            await Media2.collection.create_index([("file_name", "text")])
+            await Media2.collection.create_index([("search_terms", 1)])
+            await Media2.collection.create_index([("year", 1), ("file_type", 1)])
+            await Media2.collection.create_index([("language", 1), ("file_type", 1)])
+            await Media2.collection.create_index([("quality", 1), ("file_type", 1)])
+            await Media2.collection.create_index([("added_date", -1)])
+            await Media2.collection.create_index([("keywords", 1)])
+            await Media2.collection.create_index([("normalized_name", 1)])
+            await Media2.collection.create_index([("file_id", 1)])
+        
+        INDEXES_CREATED = True
+        logger.info("✅ सभी indexes सफलतापूर्वक बन गए")
+        return True
+        
+    except OperationFailure as e:
+        logger.error(f"❌ Index creation failed: {e}")
+        return False
+    except Exception as e:
+        logger.error(f"❌ Unexpected error: {e}")
+        return False
+
+# ═══════════════════════════════════════════════════════════
+#  CHECK DB SIZE
+# ═══════════════════════════════════════════════════════════
+
+async def check_db_size(db):
+    try:
+        now = datetime.utcnow()
+        cache_stale_by_time = _db_stats_cache["timestamp"] is None or (
+            now - _db_stats_cache["timestamp"] > timedelta(minutes=10)
+        )
+        refresh_if_size_threshold = _db_stats_cache["primary_size"] >= 10.0
+        if not cache_stale_by_time and not refresh_if_size_threshold:
+            return _db_stats_cache["primary_size"]
+        stats = await db.command("dbstats")
+        db_logical_size = stats["dataSize"]
+        db_index_size = stats["indexSize"]
+        db_logical_size_mb = db_logical_size / (1024 * 1024)
+        db_index_size_mb = db_index_size / (1024 * 1024)
+        db_size_mb = db_logical_size_mb + db_index_size_mb
+        _db_stats_cache["primary_size"] = db_size_mb
+        _db_stats_cache["timestamp"] = now
+        return db_size_mb
+    except Exception as e:
+        print(f"Error Checking Database Size: {e}")
+        return 0
+
+# ═══════════════════════════════════════════════════════════
+#  SAVE FILE - मेटाडेटा के साथ सेव करो
+# ═══════════════════════════════════════════════════════════
 
 async def save_file(media):
-    """Save file with advanced metadata extraction"""
+    """फाइल को मेटाडेटा के साथ सेव करो"""
     file_id, file_ref = unpack_new_file_id(media.file_id)
     file_name = str(media.file_name)
     
-    # Clean and extract metadata
+    # मेटाडेटा निकालो
     clean_name = TextProcessor.clean_text(file_name)
     keywords = TextProcessor.extract_keywords(file_name)
     year = TextProcessor.extract_year(file_name)
@@ -202,7 +279,7 @@ async def save_file(media):
     language = TextProcessor.extract_language(file_name)
     normalized_name = TextProcessor.normalize_title(file_name)
     
-    # Create search terms
+    # सर्च टर्म्स बनाओ
     search_terms = [normalized_name] + keywords
     if year:
         search_terms.append(str(year))
@@ -211,7 +288,7 @@ async def save_file(media):
     if quality:
         search_terms.append(quality)
     
-    # Clean filename for display
+    # फाइल नाम साफ करो
     file_name_clean = re.sub(r"[_\-\.#+$%^&*()!~`,;:\"'?/<>\[\]{}=|\\]", " ", file_name)
     file_name_clean = re.sub(r"\s+", " ", file_name_clean).strip()
     
@@ -264,6 +341,9 @@ async def save_file(media):
     logger.info(f"[SUCCESS] '{file_name}' saved to {target_db} DB with metadata.")
     return True, 1
 
+# ═══════════════════════════════════════════════════════════
+#  ADVANCED SEARCH - स्मार्ट सर्च
+# ═══════════════════════════════════════════════════════════
 
 async def advanced_search(
     chat_id: int,
@@ -277,19 +357,14 @@ async def advanced_search(
     language: Optional[str] = None,
     min_score: int = 60
 ) -> Tuple[List[Dict], str, int]:
-    """
-    Advanced search with multiple strategies:
-    1. Exact match
-    2. Fuzzy matching
-    3. Keyword search
-    4. Metadata filtering
-    """
-    # Check cache first
+    """एडवांस सर्च - फज़ी मैचिंग के साथ"""
+    
+    # कैश चेक करो
     cache_key = f"{chat_id}:{query}:{file_type}:{year}:{quality}:{language}"
     if cache_key in _search_cache:
         return _search_cache[cache_key]
     
-    # Get settings
+    # सेटिंग्स लोड करो
     if chat_id is not None:
         settings = await get_settings(int(chat_id))
         try:
@@ -303,17 +378,17 @@ async def advanced_search(
     if not query:
         return [], "", 0
     
-    # Clean query
+    # क्वेरी क्लीन करो
     clean_query = TextProcessor.clean_text(query)
     query_keywords = TextProcessor.extract_keywords(query)
     query_year = TextProcessor.extract_year(query) or year
     query_quality = TextProcessor.extract_quality(query) or quality
     query_language = TextProcessor.extract_language(query) or language
     
-    # Build search filter
+    # फ़िल्टर बनाओ
     filter_mongo = {}
     
-    # Strategy 1: Exact/near-exact match using search terms
+    # सर्च टर्म्स से मैच
     search_terms = [clean_query] + query_keywords
     if query_year:
         search_terms.append(str(query_year))
@@ -322,7 +397,6 @@ async def advanced_search(
     if query_language:
         search_terms.append(query_language)
     
-    # Use $in for search_terms matching
     if USE_CAPTION_FILTER and query:
         filter_mongo = {
             "$or": [
@@ -333,11 +407,11 @@ async def advanced_search(
     else:
         filter_mongo = {"search_terms": {"$in": search_terms}}
     
-    # Add file type filter
+    # फ़ाइल टाइप फ़िल्टर
     if file_type:
         filter_mongo["file_type"] = file_type
     
-    # Add metadata filters
+    # मेटाडेटा फ़िल्टर
     if query_year:
         filter_mongo["year"] = query_year
     if query_quality:
@@ -345,7 +419,7 @@ async def advanced_search(
     if query_language:
         filter_mongo["language"] = query_language
     
-    # Get initial results
+    # रिजल्ट्स लाओ
     total_results = await Media.count_documents(filter_mongo)
     if MULTIPLE_DB:
         total_results += await Media2.count_documents(filter_mongo)
@@ -361,16 +435,14 @@ async def advanced_search(
     else:
         files = files1
     
-    # Strategy 2: Fuzzy matching for better results
+    # फज़ी मैचिंग
     if use_fuzzy and len(files) < max_results and query_keywords:
-        # Get more results with relaxed filter
         relaxed_filter = {}
         if file_type:
             relaxed_filter["file_type"] = file_type
         if query_year:
             relaxed_filter["year"] = query_year
         
-        # Search by keywords
         if query_keywords:
             relaxed_filter["keywords"] = {"$in": query_keywords}
         
@@ -382,7 +454,6 @@ async def advanced_search(
             more_files2 = await cursor2.to_list(length=max_results * 3)
             more_files.extend(more_files2)
         
-        # Score and sort by relevance
         scored_files = []
         for file in more_files:
             if file in files:
@@ -395,7 +466,7 @@ async def advanced_search(
         scored_files.sort(key=lambda x: x[0], reverse=True)
         files.extend([f for _, f in scored_files[:max_results]])
     
-    # Remove duplicates
+    # डुप्लिकेट हटाओ
     seen = set()
     unique_files = []
     for file in files:
@@ -404,23 +475,19 @@ async def advanced_search(
             seen.add(file_id)
             unique_files.append(file)
     
-    # Limit results
     unique_files = unique_files[:max_results]
     
-    # Calculate next offset
     next_offset = offset + len(unique_files)
     if next_offset >= total_results:
         next_offset = ""
     
     result = (unique_files, next_offset, total_results)
-    
-    # Cache results
     _search_cache[cache_key] = result
-    
     return result
 
-
-# ========== ADVANCED SUGGESTIONS ==========
+# ═══════════════════════════════════════════════════════════
+#  SMART SUGGESTIONS - स्मार्ट सजेशन
+# ═══════════════════════════════════════════════════════════
 
 async def get_smart_suggestions(
     query: str,
@@ -428,17 +495,10 @@ async def get_smart_suggestions(
     limit: int = 10,
     file_type: Optional[str] = None
 ) -> List[Dict[str, any]]:
-    """
-    Get smart suggestions with:
-    1. Popular searches
-    2. Similar titles
-    3. Trending content
-    4. Recent additions
-    """
+    """स्मार्ट सजेशन - ऑटो-कम्प्लीट"""
     if not query:
         return []
     
-    # Check cache
     cache_key = f"smart:{query}:{file_type}:{limit}"
     if cache_key in _suggestion_cache:
         return _suggestion_cache[cache_key]
@@ -449,7 +509,7 @@ async def get_smart_suggestions(
     suggestions = []
     seen = set()
     
-    # Strategy 1: Auto-complete from database
+    # स्ट्रैटेजी 1: डायरेक्ट मैच
     if len(query) >= 2:
         regex = re.compile(re.escape(clean_query), re.IGNORECASE)
         filter_mongo = {
@@ -470,26 +530,23 @@ async def get_smart_suggestions(
             files2 = await cursor2.to_list(length=limit * 3)
             files.extend(files2)
         
-        # Extract unique titles
         for file in files:
             name = getattr(file, "file_name", "")
             if name and name not in seen:
                 seen.add(name)
-                # Get metadata
                 year = getattr(file, "year", None)
                 quality = getattr(file, "quality", None)
                 language = getattr(file, "language", None)
-                suggestion = {
+                suggestions.append({
                     "title": name,
                     "year": year,
                     "quality": quality,
                     "language": language,
                     "type": getattr(file, "file_type", "unknown"),
                     "display": f"{name}{f' ({year})' if year else ''}{f' [{quality}]' if quality else ''}"
-                }
-                suggestions.append(suggestion)
+                })
     
-    # Strategy 2: Keywords-based suggestions
+    # स्ट्रैटेजी 2: कीवर्ड बेस्ड
     if len(suggestions) < limit and query_keywords:
         keyword_filter = {"keywords": {"$in": query_keywords}}
         if file_type:
@@ -509,18 +566,16 @@ async def get_smart_suggestions(
                 seen.add(name)
                 year = getattr(file, "year", None)
                 quality = getattr(file, "quality", None)
-                suggestion = {
+                suggestions.append({
                     "title": name,
                     "year": year,
                     "quality": quality,
                     "type": getattr(file, "file_type", "unknown"),
                     "display": f"{name}{f' ({year})' if year else ''}"
-                }
-                suggestions.append(suggestion)
+                })
     
-    # Strategy 3: Fuzzy matching
+    # स्ट्रैटेजी 3: फज़ी मैच
     if len(suggestions) < limit:
-        # Get more files
         cursor = Media.find().sort("$natural", -1).limit(100)
         all_files = await cursor.to_list(length=100)
         
@@ -529,14 +584,13 @@ async def get_smart_suggestions(
             all_files2 = await cursor2.to_list(length=100)
             all_files.extend(all_files2)
         
-        # Score and match
         scored = []
         for file in all_files:
             name = getattr(file, "file_name", "")
             if name in seen:
                 continue
             score = fuzz.partial_ratio(clean_query, name.lower())
-            if score > 60:  # Minimum threshold
+            if score > 60:
                 scored.append((score, name, file))
         
         scored.sort(key=lambda x: x[0], reverse=True)
@@ -548,19 +602,19 @@ async def get_smart_suggestions(
                     "title": name,
                     "year": year,
                     "type": getattr(file, "file_type", "unknown"),
-                    "display": f"{name}{f' ({year})' if year else ''} (fuzzy match)"
+                    "display": f"{name}{f' ({year})' if year else ''} ⚡"
                 })
     
-    # Cache results
     _suggestion_cache[cache_key] = suggestions[:limit]
-    
     return suggestions[:limit]
 
+# ═══════════════════════════════════════════════════════════
+#  TRENDING CONTENT
+# ═══════════════════════════════════════════════════════════
 
 async def get_trending_content(limit: int = 10) -> List[Dict[str, any]]:
-    """Get trending content based on recent additions"""
+    """ट्रेंडिंग कंटेंट - पिछले 7 दिनों में सबसे ज़्यादा ऐड"""
     try:
-        # Get recent files
         recent_filter = {
             "added_date": {"$gte": datetime.utcnow() - timedelta(days=7)}
         }
@@ -573,7 +627,6 @@ async def get_trending_content(limit: int = 10) -> List[Dict[str, any]]:
             recent_files2 = await cursor2.to_list(length=50)
             recent_files.extend(recent_files2)
         
-        # Group by normalized title and count
         title_counter = defaultdict(int)
         title_info = {}
         
@@ -590,7 +643,6 @@ async def get_trending_content(limit: int = 10) -> List[Dict[str, any]]:
                         "language": getattr(file, "language", None)
                     }
         
-        # Sort by frequency
         sorted_titles = sorted(
             title_counter.items(),
             key=lambda x: x[1],
@@ -610,15 +662,16 @@ async def get_trending_content(limit: int = 10) -> List[Dict[str, any]]:
         logger.error(f"Error in get_trending_content: {e}")
         return []
 
+# ═══════════════════════════════════════════════════════════
+#  SEARCH STATS
+# ═══════════════════════════════════════════════════════════
 
 async def get_search_stats() -> Dict[str, any]:
-    """Get search statistics and insights"""
+    """सर्च स्टैटिस्टिक्स"""
     try:
-        # Get total counts
         total_primary = await Media.count_documents({})
         total_secondary = await Media2.count_documents({}) if MULTIPLE_DB else 0
         
-        # Get file type distribution
         type_counts = {}
         file_types = ["document", "video", "audio", "photo", "animation"]
         for ftype in file_types:
@@ -628,99 +681,30 @@ async def get_search_stats() -> Dict[str, any]:
             if count > 0:
                 type_counts[ftype] = count
         
-        # Get language distribution
-        lang_pipeline = [
-            {"$match": {"language": {"$exists": True, "$ne": None}}},
-            {"$group": {"_id": "$language", "count": {"$sum": 1}}},
-            {"$sort": {"count": -1}},
-            {"$limit": 10}
-        ]
-        
-        lang_counts = {}
-        if hasattr(Media, 'aggregate'):
-            cursor = Media.aggregate(lang_pipeline)
-            async for doc in cursor:
-                lang_counts[doc["_id"]] = doc["count"]
-        
-        # Get year distribution
-        year_pipeline = [
-            {"$match": {"year": {"$exists": True, "$ne": None}}},
-            {"$group": {"_id": "$year", "count": {"$sum": 1}}},
-            {"$sort": {"_id": -1}},
-            {"$limit": 20}
-        ]
-        
-        year_counts = {}
-        if hasattr(Media, 'aggregate'):
-            cursor = Media.aggregate(year_pipeline)
-            async for doc in cursor:
-                year_counts[doc["_id"]] = doc["count"]
-        
         stats = {
             "total_files": total_primary + total_secondary,
             "primary_db_size": total_primary,
             "secondary_db_size": total_secondary,
             "file_type_distribution": type_counts,
-            "language_distribution": dict(sorted(lang_counts.items(), key=lambda x: x[1], reverse=True)[:10]),
-            "year_distribution": dict(sorted(year_counts.items(), key=lambda x: x[0], reverse=True)[:20]),
             "last_updated": datetime.utcnow().isoformat()
         }
-        
         return stats
         
     except Exception as e:
         logger.error(f"Error in get_search_stats: {e}")
         return {}
 
+# ═══════════════════════════════════════════════════════════
+#  ORIGINAL FUNCTIONS - बैकवर्ड कम्पैटिबिलिटी के लिए
+# ═══════════════════════════════════════════════════════════
 
-# ========== MAINTENANCE FUNCTIONS ==========
-
-async def rebuild_search_indexes():
-    """Rebuild search indexes for better performance"""
-    try:
-        # Drop existing indexes
-        await Media.collection.drop_indexes()
-        if MULTIPLE_DB:
-            await Media2.collection.drop_indexes()
-        
-        # Create new indexes
-        await Media.collection.create_index([("search_terms", "text")])
-        await Media.collection.create_index([("keywords", "text")])
-        await Media.collection.create_index([("normalized_name", "text")])
-        await Media.collection.create_index([("year", 1), ("file_type", 1)])
-        await Media.collection.create_index([("language", 1), ("file_type", 1)])
-        await Media.collection.create_index([("quality", 1), ("file_type", 1)])
-        await Media.collection.create_index([("added_date", -1)])
-        
-        if MULTIPLE_DB:
-            await Media2.collection.create_index([("search_terms", "text")])
-            await Media2.collection.create_index([("keywords", "text")])
-            await Media2.collection.create_index([("normalized_name", "text")])
-            await Media2.collection.create_index([("year", 1), ("file_type", 1)])
-            await Media2.collection.create_index([("language", 1), ("file_type", 1)])
-            await Media2.collection.create_index([("quality", 1), ("file_type", 1)])
-            await Media2.collection.create_index([("added_date", -1)])
-        
-        logger.info("Search indexes rebuilt successfully")
-        return True
-        
-    except Exception as e:
-        logger.error(f"Error rebuilding search indexes: {e}")
-        return False
-
-
-# ========== COMPATIBILITY FUNCTIONS ==========
-
-# Keep original functions for backward compatibility
 async def get_search_results(chat_id, query, file_type=None, max_results=10, offset=0, filter=False):
-    """Wrapper for backward compatibility"""
+    """पुराने फंक्शन का रैपर - बैकवर्ड कम्पैटिबल"""
     result = await advanced_search(chat_id, query, file_type, max_results, offset)
     return result
 
-
 async def get_bad_files(query, file_type=None):
-    """Enhanced version of get_bad_files"""
-    # Original implementation with minor improvements
+    """बैड फाइल्स चेक करो"""
     query = query.strip()
     if not query:
         raw_pattern = '.'
@@ -733,7 +717,6 @@ async def get_bad_files(query, file_type=None):
     except:
         return []
     
-    # Use search_terms for better matching
     if USE_CAPTION_FILTER:
         filter = {
             '$or': [
@@ -766,8 +749,6 @@ async def get_bad_files(query, file_type=None):
     total_results = len(files)
     return files, total_results
 
-
-# Keep other original functions
 async def get_file_details(query):
     filter = {"file_id": query}
     cursor = Media.find(filter)
@@ -776,7 +757,6 @@ async def get_file_details(query):
         cursor2 = Media2.find(filter)
         filedetails = await cursor2.to_list(length=1)
     return filedetails
-
 
 def encode_file_id(s: bytes) -> str:
     r = b""
@@ -791,13 +771,10 @@ def encode_file_id(s: bytes) -> str:
             r += bytes([i])
     return base64.urlsafe_b64encode(r).decode().rstrip("=")
 
-
 def encode_file_ref(file_ref: bytes) -> str:
     return base64.urlsafe_b64encode(file_ref).decode().rstrip("=")
 
-
 def unpack_new_file_id(new_file_id):
-    """Return file_id, file_ref"""
     decoded = FileId.decode(new_file_id)
     file_id = encode_file_id(
         pack(
@@ -811,31 +788,6 @@ def unpack_new_file_id(new_file_id):
     file_ref = encode_file_ref(decoded.file_reference)
     return file_id, file_ref
 
-
-async def check_db_size(db):
-    try:
-        now = datetime.utcnow()
-        cache_stale_by_time = _db_stats_cache["timestamp"] is None or (
-            now - _db_stats_cache["timestamp"] > timedelta(minutes=10)
-        )
-        refresh_if_size_threshold = _db_stats_cache["primary_size"] >= 10.0
-        if not cache_stale_by_time and not refresh_if_size_threshold:
-            return _db_stats_cache["primary_size"]
-        stats = await db.command("dbstats")
-        db_logical_size = stats["dataSize"]
-        db_index_size = stats["indexSize"]
-        db_logical_size_mb = db_logical_size / (1024 * 1024)
-        db_index_size_mb = db_index_size / (1024 * 1024)
-        db_size_mb = db_logical_size_mb + db_index_size_mb
-        _db_stats_cache["primary_size"] = db_size_mb
-        _db_stats_cache["timestamp"] = now
-        return db_size_mb
-    except Exception as e:
-        print(f"Error Checking Database Size: {e}")
-        return 0
-
-
-# Advanced versions of dreamxbotz functions
 async def dreamxbotz_fetch_media(limit: int) -> List[dict]:
     try:
         if MULTIPLE_DB:
@@ -851,9 +803,7 @@ async def dreamxbotz_fetch_media(limit: int) -> List[dict]:
         logger.error(f"Error in dreamxbotz_fetch_media: {e}")
         return []
 
-
 async def dreamxbotz_clean_title(filename: str, is_series: bool = False) -> str:
-    # Enhanced version using TextProcessor
     try:
         if is_series:
             season_match = re.search(
@@ -882,7 +832,6 @@ async def dreamxbotz_clean_title(filename: str, is_series: bool = False) -> str:
         logger.error(f"Error in dreamxbotz_clean_title: {e}")
         return filename
 
-
 async def dreamxbotz_get_movies(limit: int = 20) -> List[str]:
     try:
         cursor = await dreamxbotz_fetch_media(limit * 2)
@@ -899,7 +848,6 @@ async def dreamxbotz_get_movies(limit: int = 20) -> List[str]:
     except Exception as e:
         logger.error(f"Error in dreamxbotz_get_movies: {e}")
         return []
-
 
 async def dreamxbotz_get_series(limit: int = 30) -> Dict[str, List[int]]:
     try:
@@ -921,3 +869,7 @@ async def dreamxbotz_get_series(limit: int = 30) -> Dict[str, List[int]]:
     except Exception as e:
         logger.error(f"Error in dreamxbotz_get_series: {e}")
         return []
+
+# ═══════════════════════════════════════════════════════════
+#  END OF FILE - बस इतना ही!
+# ═══════════════════════════════════════════════════════════
