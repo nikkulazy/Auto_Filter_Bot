@@ -1,5 +1,3 @@
-# ia_filterdb_advanced.py
-
 import logging
 from struct import pack
 import re
