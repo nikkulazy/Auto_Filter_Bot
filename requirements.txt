@@ -3,7 +3,6 @@ tgcrypto-pyrofork
 pymongo==4.13.2
 motor==3.7.1
 marshmallow<4.0.0
-telegraph
 umongo
 requests
 bs4
@@ -34,9 +33,6 @@ pyromod
 colorama
 fuzzywuzzy
 Levenshtein==0.24.0
-fuzzywuzzy==0.18.0
-python-Levenshtein==0.24.0
-cachetools==5.3.0
 
 # Git-based Packages
 git+https://github.com/DreamXBotz/cinemagoer
