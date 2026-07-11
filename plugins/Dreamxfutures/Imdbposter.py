@@ -5,7 +5,7 @@ import warnings
 import logging
 from io import BytesIO
 from datetime import datetime
-from utils import list_to_str as listx_to_str, imdb
+from utils import list_to_str, listx_to_str, imdb
 from difflib import SequenceMatcher
 from PIL import Image
 from info import DREAMXBOTZ_IMAGE_FETCH, TMDB_API_KEY, MAX_LIST_ELM
