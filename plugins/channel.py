@@ -500,7 +500,9 @@ def generate_movie_message(movie_doc, base_name):
     def extract_resolutions_from_text(text: str):
         if not text:
             return []
-        matches = re.findall(r"\b(?:\d{3,4}p|4k)\b", text, flags=re.IGNORECASE)
+        # Common resolution patterns
+        pattern = r'\b(?:\d{3,4}p|4k|720p|1080p|2160p|1440p|540p)\b'
+        matches = re.findall(pattern, text, flags=re.IGNORECASE)
         normalized = []
         for m in matches:
             ml = m.lower()
@@ -508,6 +510,7 @@ def generate_movie_message(movie_doc, base_name):
                 normalized.append("4K")
             else:
                 normalized.append(ml)
+        # Remove duplicates while preserving order
         seen = set()
         unique = []
         for q in normalized:
@@ -516,20 +519,28 @@ def generate_movie_message(movie_doc, base_name):
                 unique.append(q)
         return unique
 
+    # Group files by quality
     quality_files = {}
     all_languages = set()
     all_tags = set()
     episodes_by_season = defaultdict(set)
 
     for file in movie_doc["files"]:
+        # Extract quality from filename or stored quality
         file_qualities = []
+        
+        # Check stored quality first
         if file.get("quality") and file["quality"] != "N/A":
-            file_qualities = extract_resolutions_from_text(file["quality"]) or []
+            file_qualities = extract_resolutions_from_text(file["quality"])
+        
+        # If no stored quality, extract from filename
         if not file_qualities:
-            file_qualities = extract_resolutions_from_text(file["filename"]) or []
+            file_qualities = extract_resolutions_from_text(file["filename"])
+        
+        # If still no quality, use a default
         if not file_qualities:
-            continue
-
+            file_qualities = ["Unknown"]
+        
         for quality in file_qualities:
             if quality not in quality_files:
                 quality_files[quality] = []
@@ -571,13 +582,11 @@ def generate_movie_message(movie_doc, base_name):
     # Group by resolution and HEVC label
     grouped_by_label = {}
     for quality, files_for_quality in quality_files.items():
-        # Determine HEVC for each file and bucket into label-specific groups
         for fi in files_for_quality:
             is_hevc = False
             fname_lower = fi['filename'].lower()
             if 'hevc' in fname_lower:
                 is_hevc = True
-            # Build label like '720p' or '720p HEVC'
             base_label = quality.lower()
             label = f"{base_label} HEVC" if is_hevc else base_label
             if label not in grouped_by_label:
@@ -591,10 +600,12 @@ def generate_movie_message(movie_doc, base_name):
         m = re.search(r'(\d+)p', ll)
         return -int(m.group(1)) if m else -1
 
+    # Sort qualities from highest to lowest
     for label in sorted(grouped_by_label.keys(), key=_sort_group_key):
         files_for_label = grouped_by_label[label]
         if not files_for_label:
             continue
+        
         # Sort by size desc so larger files first
         files_for_label.sort(key=lambda x: x.get('file_size', 0), reverse=True)
         size_links = []
@@ -648,4 +659,3 @@ def generate_movie_message(movie_doc, base_name):
     ]
     
     return text, InlineKeyboardMarkup(buttons)
-    
