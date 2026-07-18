@@ -644,7 +644,8 @@ def generate_movie_message(movie_doc, base_name):
     
     # Add Movie Search Group button
     buttons = [
-        [InlineKeyboardButton("🔰𝐌𝐨𝐯𝐢𝐞 𝐒𝐞𝐚𝐫𝐜𝐡 𝐆𝐫𝐨𝐮𝐩🔰", url="https://t.me/thinkfilmy")]
+        [InlineKeyboardButton("🔰𝐌𝐨𝐯𝐢𝐞 𝐒𝐞𝐚𝐫𝐜𝐡 𝐆𝐫𝐨𝐮𝐩🔰", url="https://t.me/thinkfilmy")],
+        [InlineKeyboardButton("🔞 Masti Time Bot 🔞", url="https://t.me/Fliestoras_bot")]
     ]
     
     return text, InlineKeyboardMarkup(buttons)
