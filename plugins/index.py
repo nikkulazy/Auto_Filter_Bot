@@ -7,14 +7,11 @@ from pyrogram.errors import FloodWait
 from pyrogram.errors.exceptions.bad_request_400 import ChannelInvalid, ChatAdminRequired, UsernameInvalid, UsernameNotModified
 from info import ADMINS, INDEX_REQ_CHANNEL as LOG_CHANNEL
 from database.users_chats_db import db
+from plugins.channel import process_and_send_update
 from database.ia_filterdb import save_file
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from utils import temp, get_readable_time
 from math import ceil
-try:
-    from plugins.channel import process_and_send_update
-except ImportError:
-    from plugins.channel import media_handler as process_and_send_update
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
