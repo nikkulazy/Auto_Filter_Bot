@@ -78,7 +78,7 @@ QUALITY_PATTERN = re.compile(
     re.IGNORECASE
 )
 YEAR_PATTERN = re.compile(r"(?<![A-Za-z0-9])(?:19|20)\d{2}(?![A-Za-z0-9])")
-RANGE_REGEX = re.compile(r'\bS(\d{1,2})[^\w\n\r]*E(?:p(?:isode)?)?0*(\d{1,2})\s*(?:to|-)\s*(?:E(?:p(?:isode)?)?)?0*(\d{1,2})',re.IGNORECASE)
+RANGE_REGEX = re.compile(r'\bS(\d{1,2})[^\w\n\r]*E(?:p(?:isode)?)?0*(\d{1,2})\s*(?:to|-)\s*(?:E(?:p(?:isode)?)?)?0*(\d{1,3})',re.IGNORECASE)
 SINGLE_REGEX = re.compile(r'\bS(\d{1,2})[^\w\n\r]*E(?:p(?:isode)?)?0*(\d{1,3})', re.IGNORECASE)
 NAMED_REGEX = re.compile(r'Season\s*0*(\d{1,2})[\s\-,:]*Ep(?:isode)?\s*0*(\d{1,3})', re.IGNORECASE)
 EP_ONLY_RANGE = re.compile(r'\b(?:EP|Episode)0*(\d{1,3})\s*-\s*0*(\d{1,3})\b',re.IGNORECASE)
@@ -87,6 +87,10 @@ EP_ONLY_RANGE = re.compile(r'\b(?:EP|Episode)0*(\d{1,3})\s*-\s*0*(\d{1,3})\b',re
 MEDIA_FILTER = filters.document | filters.video | filters.audio
 locks = defaultdict(asyncio.Lock)
 pending_updates = {}
+
+# Queue system for processing
+processing_queue = defaultdict(asyncio.Queue)
+is_processing = defaultdict(bool)
 
 # Global error_tmdb variable
 error_tmdb = False
@@ -232,158 +236,170 @@ async def media_handler(bot, message):
 
     try:
         if await db.movie_update_status(bot.me.id):
-            await process_and_send_update(bot, media.file_name, media.caption, media)
+            # Extract base name first
+            media_info = extract_media_info(media.file_name, media.caption)
+            base_name = media_info["base_name"]
+            
+            # Add to queue for this movie
+            await processing_queue[base_name].put((media, media_info))
+            
+            # Start processing if not already running
+            if not is_processing[base_name]:
+                asyncio.create_task(process_queue(bot, base_name))
     except Exception:
         logger.exception("Error processing media")
 
-async def process_and_send_update(bot, filename, caption, media):
-    try:
-        media_info = extract_media_info(filename, caption)
-        base_name = media_info["base_name"]
-
-        lock = locks[base_name]
-        async with lock:
-            await _process_with_lock(bot, filename, caption, media_info, base_name, media)
-    except PyMongoError as e:
-        logger.error("Database error: %s", e)
-    except Exception as e:
-        logger.exception("Processing failed: %s", e)
-
-async def _process_with_lock(bot, filename, caption, media_info, base_name, media):
-    global error_tmdb
+async def process_queue(bot, base_name):
+    """Process all files for a movie in sequence"""
+    is_processing[base_name] = True
     
-    if not hasattr(db, 'movie_updates'):
-        db.movie_updates = db.db.movie_updates
-
-    movie_doc = await db.movie_updates.find_one({"_id": base_name})
-
-    error_tmdb = False
-
     try:
-        file_id, _ = unpack_new_file_id(media.file_id)
-    except Exception:
-        file_id = "unknown_id"
+        while not processing_queue[base_name].empty():
+            media, media_info = await processing_queue[base_name].get()
+            
+            # Process this file
+            await process_single_file(bot, media, media_info, base_name)
+            
+            # Small delay to avoid flood
+            await asyncio.sleep(0.5)
+            
+    except Exception as e:
+        logger.error(f"Queue processing error for {base_name}: {e}")
+    finally:
+        is_processing[base_name] = False
+        # Clean up queue
+        if processing_queue[base_name].empty():
+            del processing_queue[base_name]
 
-    file_size = media.file_size if hasattr(media, "file_size") else 0
+async def process_single_file(bot, media, media_info, base_name):
+    """Process a single file"""
+    try:
+        filename = media.file_name
+        caption = media.caption
+        
+        # Check if movie already exists
+        movie_doc = await db.movie_updates.find_one({"_id": base_name})
+        
+        try:
+            file_id, _ = unpack_new_file_id(media.file_id)
+        except Exception:
+            file_id = "unknown_id"
 
-    file_data = {
-        "filename": filename,
-        "processed": media_info["processed"],
-        "quality": media_info["quality"],
-        "language": media_info["language"],
-        "ott_platform": media_info["ott_platform"],
-        "timestamp": datetime.now(),
-        "tag": media_info["tag"],
-        "season": media_info["season"],
-        "episode": media_info["episode"],
-        "file_id": file_id,
-        "file_size": file_size
-    }
+        file_size = media.file_size if hasattr(media, "file_size") else 0
 
-    # Movie does not exist yet
-    if not movie_doc:
-        if TMDB_POSTER:
-            details = await get_movie_detailsx(base_name)
-
-            if not details or details.get("error"):
-                error_tmdb = True
-                logger.info(
-                    f"TMDB failed for '{base_name}', switching to IMDb"
-                )
-                details = await get_movie_details(base_name) or {}
-
-        else:
-            details = await get_movie_details(base_name) or {}
-
-        if not details:
-            details = {}
-
-        raw_genres = details.get("genres", "N/A")
-
-        if isinstance(raw_genres, str):
-            genre_list = [g.strip() for g in raw_genres.split(",")]
-            genres = ", ".join(
-                g for g in genre_list
-                if g in STANDARD_GENRES
-            ) or "N/A"
-        else:
-            genres = ", ".join(
-                g for g in raw_genres
-                if g in STANDARD_GENRES
-            ) or "N/A"
-
-        movie_doc = {
-            "_id": base_name,
-            "files": [file_data],
-            "poster_url": (
-                details.get("backdrop_url")
-                if LANDSCAPE_POSTER
-                and TMDB_POSTER
-                and not error_tmdb
-                else details.get("poster_url")
-            ),
-            "genres": genres,
-            "rating": details.get("rating", "N/A"),
-            "imdb_url": (
-                details.get("tmdb_url")
-                if TMDB_POSTER and not error_tmdb
-                else details.get("url", "")
-            ),
-            "year": media_info["year"] or details.get("year"),
-            "tag": media_info["tag"],
+        file_data = {
+            "filename": filename,
+            "processed": media_info["processed"],
+            "quality": media_info["quality"],
+            "language": media_info["language"],
             "ott_platform": media_info["ott_platform"],
-            "message_id": None,
-            "is_photo": False
+            "timestamp": datetime.now(),
+            "tag": media_info["tag"],
+            "season": media_info["season"],
+            "episode": media_info["episode"],
+            "file_id": file_id,
+            "file_size": file_size
         }
 
-        try:
-            await db.movie_updates.insert_one(movie_doc)
-            await send_movie_update(bot, base_name)
-        except DuplicateKeyError:
-            # Movie was created by another process, fetch and update
-            movie_doc = await db.movie_updates.find_one({"_id": base_name})
-            if movie_doc:
-                await _add_file_to_movie(movie_doc, file_data, bot, base_name)
+        # Movie does not exist yet - Create NEW post
+        if not movie_doc:
+            await create_new_movie_post(bot, base_name, media_info, file_data, media)
+        else:
+            # Movie exists - Add file to existing post
+            await add_file_to_existing_movie(bot, base_name, movie_doc, file_data)
+            
+    except Exception as e:
+        logger.error(f"Error processing single file: {e}")
 
-    else:
-        # Movie exists, add file and update
-        await _add_file_to_movie(movie_doc, file_data, bot, base_name)
-
-async def _add_file_to_movie(movie_doc, file_data, bot, base_name):
-    """Add new file to existing movie and update the message"""
+async def create_new_movie_post(bot, base_name, media_info, file_data, media):
+    """Create a new movie post with first file"""
+    global error_tmdb
     
-    # Check if file already exists (by filename)
+    if TMDB_POSTER:
+        details = await get_movie_detailsx(base_name)
+        if not details or details.get("error"):
+            error_tmdb = True
+            logger.info(f"TMDB failed for '{base_name}', switching to IMDb")
+            details = await get_movie_details(base_name) or {}
+    else:
+        details = await get_movie_details(base_name) or {}
+
+    if not details:
+        details = {}
+
+    raw_genres = details.get("genres", "N/A")
+    if isinstance(raw_genres, str):
+        genre_list = [g.strip() for g in raw_genres.split(",")]
+        genres = ", ".join(g for g in genre_list if g in STANDARD_GENRES) or "N/A"
+    else:
+        genres = ", ".join(g for g in raw_genres if g in STANDARD_GENRES) or "N/A"
+
+    movie_doc = {
+        "_id": base_name,
+        "files": [file_data],
+        "poster_url": (
+            details.get("backdrop_url")
+            if LANDSCAPE_POSTER and TMDB_POSTER and not error_tmdb
+            else details.get("poster_url")
+        ),
+        "genres": genres,
+        "rating": details.get("rating", "N/A"),
+        "imdb_url": (
+            details.get("tmdb_url")
+            if TMDB_POSTER and not error_tmdb
+            else details.get("url", "")
+        ),
+        "year": media_info["year"] or details.get("year"),
+        "tag": media_info["tag"],
+        "ott_platform": media_info["ott_platform"],
+        "message_id": None,
+        "is_photo": False
+    }
+
+    try:
+        await db.movie_updates.insert_one(movie_doc)
+        # Send the post
+        await send_movie_update(bot, base_name)
+    except DuplicateKeyError:
+        # Movie created by another process
+        movie_doc = await db.movie_updates.find_one({"_id": base_name})
+        if movie_doc:
+            await add_file_to_existing_movie(bot, base_name, movie_doc, file_data)
+
+async def add_file_to_existing_movie(bot, base_name, movie_doc, file_data):
+    """Add file to existing movie and UPDATE the same post"""
+    
+    # Check if file already exists
     for existing_file in movie_doc["files"]:
         if existing_file["filename"] == file_data["filename"]:
             logger.info(f"File '{file_data['filename']}' already exists, skipping")
             return
         
-        # For series, check if same season+episode+quality combination exists
+        # Check for duplicate quality
         if (file_data.get("tag") == "#SERIES" and
             existing_file.get("season") == file_data.get("season") and
             existing_file.get("episode") == file_data.get("episode") and
             existing_file.get("quality") == file_data.get("quality")):
-            logger.info(f"Same quality '{file_data['quality']}' already exists for S{file_data['season']}E{file_data['episode']}, skipping")
+            logger.info(f"Same quality already exists, skipping")
             return
         
-        # For movies, check if same quality exists
         if (file_data.get("tag") == "#MOVIE" and
             existing_file.get("quality") == file_data.get("quality")):
-            logger.info(f"Same quality '{file_data['quality']}' already exists, skipping")
+            logger.info(f"Same quality already exists, skipping")
             return
 
-    # Add new file
+    # Add file to database
     await db.movie_updates.update_one(
         {"_id": base_name},
         {"$push": {"files": file_data}}
     )
     
-    # Schedule update for existing message
-    schedule_update(bot, base_name)
-    
-    # Also update message immediately if schedule_update delay is too long
+    # UPDATE the existing post (not create new)
     if movie_doc.get("message_id"):
         await update_movie_message(bot, base_name)
+    else:
+        # If no message exists, send new one
+        await send_movie_update(bot, base_name)
 
 async def send_movie_update(bot, base_name):
     global error_tmdb
