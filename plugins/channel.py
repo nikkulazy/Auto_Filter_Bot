@@ -88,6 +88,9 @@ MEDIA_FILTER = filters.document | filters.video | filters.audio
 locks = defaultdict(asyncio.Lock)
 pending_updates = {}
 
+# Global error_tmdb variable
+error_tmdb = False
+
 
 def clean_mentions_links(text: str) -> str:
     return CLEAN_PATTERN.sub("", text or "").strip()
@@ -222,7 +225,6 @@ async def media_handler(bot, message):
 
     media.file_type = next(ft for ft in ("document", "video", "audio") if hasattr(message, ft))
     media.caption = message.caption or ""
-    # Keep original Telegram file_id for saving; DB file_id will be derived in save_file
     
     success, info = await save_file(media)
     if not success:
@@ -238,23 +240,23 @@ async def process_and_send_update(bot, filename, caption, media):
     try:
         media_info = extract_media_info(filename, caption)
         base_name = media_info["base_name"]
-        processed = media_info["processed"]
 
         lock = locks[base_name]
         async with lock:
-            await _process_with_lock(bot, filename, caption, media_info, base_name, processed, media)
+            await _process_with_lock(bot, filename, caption, media_info, base_name, media)
     except PyMongoError as e:
         logger.error("Database error: %s", e)
     except Exception as e:
         logger.exception("Processing failed: %s", e)
 
-async def _process_with_lock(bot, filename, caption, media_info, base_name, processed, media):
+async def _process_with_lock(bot, filename, caption, media_info, base_name, media):
+    global error_tmdb
+    
     if not hasattr(db, 'movie_updates'):
         db.movie_updates = db.db.movie_updates
 
     movie_doc = await db.movie_updates.find_one({"_id": base_name})
 
-    global error_tmdb
     error_tmdb = False
 
     try:
@@ -266,7 +268,7 @@ async def _process_with_lock(bot, filename, caption, media_info, base_name, proc
 
     file_data = {
         "filename": filename,
-        "processed": processed,
+        "processed": media_info["processed"],
         "quality": media_info["quality"],
         "language": media_info["language"],
         "ott_platform": media_info["ott_platform"],
@@ -280,7 +282,6 @@ async def _process_with_lock(bot, filename, caption, media_info, base_name, proc
 
     # Movie does not exist yet
     if not movie_doc:
-
         if TMDB_POSTER:
             details = await get_movie_detailsx(base_name)
 
@@ -337,56 +338,57 @@ async def _process_with_lock(bot, filename, caption, media_info, base_name, proc
 
         try:
             await db.movie_updates.insert_one(movie_doc)
-
             await send_movie_update(bot, base_name)
-
-            movie_doc = await db.movie_updates.find_one(
-                {"_id": base_name}
-            )
-
         except DuplicateKeyError:
-
-            movie_doc = await db.movie_updates.find_one(
-                {"_id": base_name}
-            )
-
+            # Movie was created by another process, fetch and update
+            movie_doc = await db.movie_updates.find_one({"_id": base_name})
             if movie_doc:
-
-                if any(
-                    f["filename"] == filename
-                    for f in movie_doc["files"]
-                ):
-                    return
-
-                await db.movie_updates.update_one(
-                    {"_id": base_name},
-                    {"$push": {"files": file_data}}
-                )
-
-                movie_doc["files"].append(file_data)
-
-                schedule_update(bot, base_name)
+                await _add_file_to_movie(movie_doc, file_data, bot, base_name)
 
     else:
+        # Movie exists, add file and update
+        await _add_file_to_movie(movie_doc, file_data, bot, base_name)
 
-        if any(
-            f["filename"] == filename
-            for f in movie_doc["files"]
-        ):
+async def _add_file_to_movie(movie_doc, file_data, bot, base_name):
+    """Add new file to existing movie and update the message"""
+    
+    # Check if file already exists (by filename)
+    for existing_file in movie_doc["files"]:
+        if existing_file["filename"] == file_data["filename"]:
+            logger.info(f"File '{file_data['filename']}' already exists, skipping")
+            return
+        
+        # For series, check if same season+episode+quality combination exists
+        if (file_data.get("tag") == "#SERIES" and
+            existing_file.get("season") == file_data.get("season") and
+            existing_file.get("episode") == file_data.get("episode") and
+            existing_file.get("quality") == file_data.get("quality")):
+            logger.info(f"Same quality '{file_data['quality']}' already exists for S{file_data['season']}E{file_data['episode']}, skipping")
+            return
+        
+        # For movies, check if same quality exists
+        if (file_data.get("tag") == "#MOVIE" and
+            existing_file.get("quality") == file_data.get("quality")):
+            logger.info(f"Same quality '{file_data['quality']}' already exists, skipping")
             return
 
-        await db.movie_updates.update_one(
-            {"_id": base_name},
-            {"$push": {"files": file_data}}
-        )
-
-        movie_doc["files"].append(file_data)
-
-        schedule_update(bot, base_name)
+    # Add new file
+    await db.movie_updates.update_one(
+        {"_id": base_name},
+        {"$push": {"files": file_data}}
+    )
+    
+    # Schedule update for existing message
+    schedule_update(bot, base_name)
+    
+    # Also update message immediately if schedule_update delay is too long
+    if movie_doc.get("message_id"):
+        await update_movie_message(bot, base_name)
 
 async def send_movie_update(bot, base_name):
+    global error_tmdb
+    
     max_retries = 3
-    base_delay = 5
     for attempt in range(max_retries):
         try:
             movie_doc = await db.movie_updates.find_one({"_id": base_name})
@@ -434,14 +436,17 @@ async def send_movie_update(bot, base_name):
                     {"$set": {"message_id": msg.id, "is_photo": is_photo}}
                 )
             return msg
+            
         except FloodWait as e:
             wait_time = e.value + 2
             await asyncio.sleep(wait_time)
+            # Don't increment attempt, just retry with updated wait time
+            
         except Exception as e:
             logger.error(f"Failed to send movie update: {e}")
             break
+            
     return None
-
 
 async def update_movie_message(bot, base_name):
     try:
@@ -478,9 +483,21 @@ async def update_movie_message(bot, base_name):
                     disable_web_page_preview=not LINK_PREVIEW
                 )
             return
-        except (MessageIdInvalid, MessageNotModified):
+            
+        except MessageNotModified:
+            # Message already has same content, no changes needed
             pass
-        except Exception:
+            
+        except MessageIdInvalid:
+            # Message ID invalid, create new message
+            await db.movie_updates.update_one(
+                {"_id": base_name},
+                {"$set": {"message_id": None, "is_photo": False}}
+            )
+            await send_movie_update(bot, base_name)
+            
+        except Exception as e:
+            logger.error(f"Failed to update movie message: {e}")
             try:
                 await bot.delete_messages(
                     chat_id=MOVIE_UPDATE_CHANNEL,
@@ -493,6 +510,7 @@ async def update_movie_message(bot, base_name):
             except Exception:
                 pass
             await send_movie_update(bot, base_name)
+            
     except Exception as e:
         logger.error(f"Failed to update movie message: {e}")
 
@@ -523,12 +541,18 @@ def generate_movie_message(movie_doc, base_name):
 
     for file in movie_doc["files"]:
         file_qualities = []
+        
+        # Get quality from file data
         if file.get("quality") and file["quality"] != "N/A":
             file_qualities = extract_resolutions_from_text(file["quality"]) or []
+        
+        # If no quality found, try from filename
         if not file_qualities:
             file_qualities = extract_resolutions_from_text(file["filename"]) or []
+        
+        # If still no quality, use "N/A"
         if not file_qualities:
-            continue
+            file_qualities = ["N/A"]
 
         for quality in file_qualities:
             if quality not in quality_files:
@@ -539,7 +563,9 @@ def generate_movie_message(movie_doc, base_name):
                 'file_id': file.get('file_id', 'unknown_id'),
                 'file_size': file.get('file_size', 0),
                 'language': file.get("language", "N/A"),
-                'ott_platform': file.get("ott_platform", "N/A")
+                'ott_platform': file.get("ott_platform", "N/A"),
+                'season': file.get("season"),
+                'episode': file.get("episode")
             })
 
         if file.get("language") and file["language"] != "N/A":
@@ -568,18 +594,21 @@ def generate_movie_message(movie_doc, base_name):
     caption_lines.append("<blockquote>🚀 Telegram Files ✨</blockquote>")
     caption_lines.append("")
     
-    # Group by resolution and HEVC label
+    # Group by quality and HEVC
     grouped_by_label = {}
     for quality, files_for_quality in quality_files.items():
-        # Determine HEVC for each file and bucket into label-specific groups
         for fi in files_for_quality:
             is_hevc = False
             fname_lower = fi['filename'].lower()
-            if 'hevc' in fname_lower:
+            if 'hevc' in fname_lower or 'x265' in fname_lower or 'h265' in fname_lower:
                 is_hevc = True
-            # Build label like '720p' or '720p HEVC'
+            
             base_label = quality.lower()
+            if base_label == "n/a":
+                base_label = "Unknown"
+                
             label = f"{base_label} HEVC" if is_hevc else base_label
+            
             if label not in grouped_by_label:
                 grouped_by_label[label] = []
             grouped_by_label[label].append(fi)
@@ -591,20 +620,27 @@ def generate_movie_message(movie_doc, base_name):
         m = re.search(r'(\d+)p', ll)
         return -int(m.group(1)) if m else -1
 
-    for label in sorted(grouped_by_label.keys(), key=_sort_group_key):
+    # Sort and display all qualities
+    sorted_labels = sorted(grouped_by_label.keys(), key=_sort_group_key)
+    
+    for label in sorted_labels:
         files_for_label = grouped_by_label[label]
         if not files_for_label:
             continue
-        # Sort by size desc so larger files first
+            
+        # Sort by file size (larger first)
         files_for_label.sort(key=lambda x: x.get('file_size', 0), reverse=True)
+        
         size_links = []
         for file_info in files_for_label:
             size_str = get_file_size_mb(file_info.get('file_size', 0))
             link = f'<a href="https://telegram.me/{temp.U_NAME}?start=file_{MOVIE_UPDATE_CHANNEL}_{file_info["file_id"]}">{size_str}</a>'
             size_links.append(link)
+        
         caption_lines.append(f"📦 {label} : {' | '.join(size_links)}")
         caption_lines.append("")
     
+    # Show episode information for series
     if episodes_by_season:
         caption_lines.append("📺 Episodes Available:")
         for season, episodes in sorted(episodes_by_season.items(), key=lambda x: int(x[0])):
@@ -649,4 +685,3 @@ def generate_movie_message(movie_doc, base_name):
     ]
     
     return text, InlineKeyboardMarkup(buttons)
-    
