@@ -649,3 +649,22 @@ def generate_movie_message(movie_doc, base_name):
     
     return text, InlineKeyboardMarkup(buttons)
     
+# ============================================
+# LEGACY FUNCTION FOR INDEX.PY COMPATIBILITY
+# ============================================
+
+async def process_and_send_update(bot, filename, caption, media):
+    """Legacy function for index.py compatibility"""
+    try:
+        media_info = extract_media_info(filename, caption)
+        base_name = media_info["base_name"]
+        
+        # Add to queue for processing
+        await processing_queue[base_name].put((media, media_info))
+        
+        # Start processing if not already running
+        if not is_processing[base_name]:
+            asyncio.create_task(process_queue(bot, base_name))
+            
+    except Exception as e:
+        logger.error(f"Error in process_and_send_update: {e}")
