@@ -8,6 +8,7 @@ from datetime import datetime
 from difflib import SequenceMatcher
 from PIL import Image
 from info import DREAMXBOTZ_IMAGE_FETCH, TMDB_API_KEY, MAX_LIST_ELM
+from utils import list_to_str, imdb
 
 logger = logging.getLogger(__name__)
 LONG_IMDB_DESCRIPTION = False
