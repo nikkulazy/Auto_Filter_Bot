@@ -17,6 +17,9 @@ from typing import Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
+# Global variable for TMDB error tracking
+error_tmdb = False
+
 # Precomputed sets for faster lookups
 IGNORE_WORDS = {
     "rarbg", "dub", "sub", "sample", "mkv", "aac", "combined",
@@ -78,11 +81,6 @@ QUALITY_PATTERN = re.compile(
     re.IGNORECASE
 )
 YEAR_PATTERN = re.compile(r"(?<![A-Za-z0-9])(?:19|20)\d{2}(?![A-Za-z0-9])")
-RANGE_REGEX = re.compile(r'\bS(\d{1,2})[^\w\n\r]*E(?:p(?:isode)?)?0*(\d{1,2})\s*(?:to|-)\s*(?:E(?:p(?:isode)?)?)?0*(\d{1,2})',re.IGNORECASE)
-SINGLE_REGEX = re.compile(r'\bS(\d{1,2})[^\w\n\r]*E(?:p(?:isode)?)?0*(\d{1,3})', re.IGNORECASE)
-NAMED_REGEX = re.compile(r'Season\s*0*(\d{1,2})[\s\-,:]*Ep(?:isode)?\s*0*(\d{1,3})', re.IGNORECASE)
-EP_ONLY_RANGE = re.compile(r'\b(?:EP|Episode)0*(\d{1,3})\s*-\s*0*(\d{1,3})\b',re.IGNORECASE)
-
 
 MEDIA_FILTER = filters.document | filters.video | filters.audio
 locks = defaultdict(asyncio.Lock)
@@ -109,18 +107,59 @@ def extract_ott_platform(text: str) -> str:
     platforms = {plat for key, plat in OTT_PLATFORMS.items() if key in text}
     return " | ".join(platforms) if platforms else "N/A"
 
-def extract_season_episode(filename: str) -> Tuple[Optional[int], Optional[str]]:
-    if m := EP_ONLY_RANGE.search(filename):
-        return 1, f"{int(m.group(1))}-{int(m.group(2))}"
-    for pattern in (RANGE_REGEX, SINGLE_REGEX, NAMED_REGEX):
-        if m := pattern.search(filename):
-            season = int(m.group(1))
-            if pattern == RANGE_REGEX:
-                ep = f"{m.group(2)}-{m.group(3)}"
+def extract_season_episode(filename: str) -> Tuple[Optional[int], Optional[str], Optional[str], Optional[bool]]:
+    """
+    Returns: (season, episode_display, episode_number, is_combined)
+    episode_display: "E01" for single, "E01-E03" for range, "Combined [E01-E10]" for combined
+    episode_number: "01" for single, "01-03" for range
+    is_combined: True if multiple episodes combined
+    """
+    
+    # Combined episodes patterns - E01-E10, Episode 1-10, Combined [E01-E10]
+    combined_patterns = [
+        r'\bE(?:p(?:isode)?)?0*(\d{1,3})\s*[-–]\s*E(?:p(?:isode)?)?0*(\d{1,3})\b',  # E01-E10
+        r'\b(?:EP|Episode)\s*0*(\d{1,3})\s*[-–]\s*0*(\d{1,3})\b',  # Episode 1-10
+        r'\bCombined\s*[\[(]?\s*E(?:p(?:isode)?)?0*(\d{1,3})\s*[-–]\s*E(?:p(?:isode)?)?0*(\d{1,3})\s*[)\]]?',  # Combined [E01-E10]
+        r'\bE(?:p(?:isode)?)?0*(\d{1,3})\s*[-–]\s*(\d{1,3})\s*(?:Episodes?|E(?:p(?:isode)?)?)?',  # E01-10 Episodes
+    ]
+    
+    # Check for combined episodes first
+    for pattern in combined_patterns:
+        if m := re.search(pattern, filename, re.IGNORECASE):
+            start = int(m.group(1))
+            end = int(m.group(2))
+            if end - start >= 1:  # More than 1 episode
+                return 1, f"E{start:02d}-E{end:02d}", f"{start:02d}-{end:02d}", True
             else:
-                ep = m.group(2)
-            return season, ep
-    return None, None
+                return 1, f"E{start:02d}", f"{start:02d}", False
+    
+    # Single Episode - E01, Episode 1, etc.
+    single_patterns = [
+        r'\bE(?:p(?:isode)?)?0*(\d{1,3})\b',  # E01, Ep1, Episode1
+        r'\b(?:EP|Episode)\s*0*(\d{1,3})\b',   # EP 1, Episode 1
+    ]
+    
+    # Season + Episode patterns
+    season_patterns = [
+        r'\bS(\d{1,2})\s*E(?:p(?:isode)?)?0*(\d{1,3})\b',  # S01E01
+        r'\bS(\d{1,2})[^\w\n\r]*E(?:p(?:isode)?)?0*(\d{1,3})\b',  # S1 E01
+        r'Season\s*0*(\d{1,2})[\s\-,:]*Ep(?:isode)?\s*0*(\d{1,3})',  # Season 1 Episode 1
+    ]
+    
+    # First check for Season + Episode
+    for pattern in season_patterns:
+        if m := re.search(pattern, filename, re.IGNORECASE):
+            season = int(m.group(1))
+            ep_num = int(m.group(2))
+            return season, f"E{ep_num:02d}", f"{ep_num:02d}", False
+    
+    # Check for single Episode (without season)
+    for pattern in single_patterns:
+        if m := re.search(pattern, filename, re.IGNORECASE):
+            ep_num = int(m.group(1))
+            return 1, f"E{ep_num:02d}", f"{ep_num:02d}", False
+    
+    return None, None, None, False
 
 def schedule_update(bot, base_name, delay=5):
     if handle := pending_updates.get(base_name):
@@ -159,22 +198,44 @@ def extract_media_info(filename: str, caption: str):
     lang_keys = {k for k in CAPTION_LANGUAGES if k in caption_clean or k in filename.lower()}
     language = ", ".join(sorted({CAPTION_LANGUAGES[k] for k in lang_keys})) if lang_keys else "N/A"
 
-    season, episode = extract_season_episode(filename)
+    # Extract season and episode with display format
+    season, episode_display, episode_number, is_combined = extract_season_episode(filename)
+    
     if season is not None:
         tag = "#SERIES"
-        if m := (RANGE_REGEX.search(filename) or SINGLE_REGEX.search(filename) or NAMED_REGEX.search(filename) or EP_ONLY_RANGE.search(filename)):
-            match_str = m.group(0)
-            start_idx = filename.lower().find(match_str.lower())
-            end_idx = start_idx + len(match_str)
-            processed_raw = filename[:end_idx]
-            base_raw = filename[:start_idx]
-            if year_match := YEAR_PATTERN.search(filename.lower()[end_idx:]):
-                y = year_match.group(0)
-                yi = filename.lower().find(y, end_idx)
-                if yi != -1:
-                    processed_raw = filename[:yi+4]
-                    base_raw += f" {y}"
+        
+        # If combined episodes, format as "Combined [E01-E10]"
+        if is_combined and episode_display:
+            episode = f"Combined [{episode_display}]"
+        else:
+            episode = episode_display  # Store as "E01" or "E01-E03"
+        
+        # Process filename to remove season/episode for base_name
+        temp_filename = filename
+        patterns_to_remove = [
+            r'\bS\d{1,2}\s*E\d{1,3}\s*[-–]\s*E\d{1,3}\b',  # S01E01-E03
+            r'\bS\d{1,2}\s*E\d{1,3}\b',  # S01E01
+            r'\bS\d{1,2}[^\w\n\r]*E\d{1,3}\b',  # S1 E01
+            r'Season\s*\d{1,2}[\s\-,:]*Ep(?:isode)?\s*\d{1,3}',  # Season 1 Episode 1
+            r'\bE\d{1,3}\s*[-–]\s*E\d{1,3}\b',  # E01-E03
+            r'\bE\d{1,3}\b',  # E01
+            r'\bEP\s*\d{1,3}\b',  # EP 1
+            r'\bEpisode\s*\d{1,3}\b',  # Episode 1
+            r'\bCombined\s*[\[(]?\s*E\d{1,3}\s*[-–]\s*E\d{1,3}\s*[)\]]?',  # Combined [E01-E03]
+        ]
+        for pattern in patterns_to_remove:
+            temp_filename = re.sub(pattern, '', temp_filename, flags=re.IGNORECASE)
+        
+        processed_raw = temp_filename.strip()
+        base_raw = processed_raw
+        
+        if year_match := YEAR_PATTERN.search(temp_filename):
+            y = year_match.group(0)
+            year = y
+            processed_raw = temp_filename[:temp_filename.lower().find(y.lower()) + 4]
+            base_raw = processed_raw
     else:
+        # Movie logic
         if year_match := YEAR_PATTERN.search(unified):
             year = year_match.group(0)
             year_idx = filename.lower().find(year.lower())
@@ -220,9 +281,11 @@ async def media_handler(bot, message):
     if not media:
         return
 
-    media.file_type = next(ft for ft in ("document", "video", "audio") if hasattr(message, ft))
+    media.file_type = next((ft for ft in ("document", "video", "audio") if hasattr(message, ft)), None)
+    if not media.file_type:
+        return
+    
     media.caption = message.caption or ""
-    # Keep original Telegram file_id for saving; DB file_id will be derived in save_file
     
     success, info = await save_file(media)
     if not success:
@@ -249,12 +312,13 @@ async def process_and_send_update(bot, filename, caption, media):
         logger.exception("Processing failed: %s", e)
 
 async def _process_with_lock(bot, filename, caption, media_info, base_name, processed, media):
+    global error_tmdb
+    
     if not hasattr(db, 'movie_updates'):
         db.movie_updates = db.db.movie_updates
 
     movie_doc = await db.movie_updates.find_one({"_id": base_name})
 
-    global error_tmdb
     error_tmdb = False
 
     try:
@@ -337,51 +401,29 @@ async def _process_with_lock(bot, filename, caption, media_info, base_name, proc
 
         try:
             await db.movie_updates.insert_one(movie_doc)
-
             await send_movie_update(bot, base_name)
-
-            movie_doc = await db.movie_updates.find_one(
-                {"_id": base_name}
-            )
+            movie_doc = await db.movie_updates.find_one({"_id": base_name})
 
         except DuplicateKeyError:
-
-            movie_doc = await db.movie_updates.find_one(
-                {"_id": base_name}
-            )
-
+            movie_doc = await db.movie_updates.find_one({"_id": base_name})
             if movie_doc:
-
-                if any(
-                    f["filename"] == filename
-                    for f in movie_doc["files"]
-                ):
+                if any(f["filename"] == filename for f in movie_doc["files"]):
                     return
-
                 await db.movie_updates.update_one(
                     {"_id": base_name},
                     {"$push": {"files": file_data}}
                 )
-
                 movie_doc["files"].append(file_data)
-
                 schedule_update(bot, base_name)
 
     else:
-
-        if any(
-            f["filename"] == filename
-            for f in movie_doc["files"]
-        ):
+        if any(f["filename"] == filename for f in movie_doc["files"]):
             return
-
         await db.movie_updates.update_one(
             {"_id": base_name},
             {"$push": {"files": file_data}}
         )
-
         movie_doc["files"].append(file_data)
-
         schedule_update(bot, base_name)
 
 async def send_movie_update(bot, base_name):
@@ -442,7 +484,6 @@ async def send_movie_update(bot, base_name):
             break
     return None
 
-
 async def update_movie_message(bot, base_name):
     try:
         movie_doc = await db.movie_updates.find_one({"_id": base_name})
@@ -497,6 +538,8 @@ async def update_movie_message(bot, base_name):
         logger.error(f"Failed to update movie message: {e}")
 
 def generate_movie_message(movie_doc, base_name):
+    global error_tmdb
+    
     def extract_resolutions_from_text(text: str):
         if not text:
             return []
@@ -519,7 +562,8 @@ def generate_movie_message(movie_doc, base_name):
     quality_files = {}
     all_languages = set()
     all_tags = set()
-    episodes_by_season = defaultdict(set)
+    episodes_by_season = defaultdict(dict)
+    episode_files = {}
 
     for file in movie_doc["files"]:
         file_qualities = []
@@ -539,7 +583,9 @@ def generate_movie_message(movie_doc, base_name):
                 'file_id': file.get('file_id', 'unknown_id'),
                 'file_size': file.get('file_size', 0),
                 'language': file.get("language", "N/A"),
-                'ott_platform': file.get("ott_platform", "N/A")
+                'ott_platform': file.get("ott_platform", "N/A"),
+                'episode': file.get("episode", None),
+                'season': file.get("season", None)
             })
 
         if file.get("language") and file["language"] != "N/A":
@@ -551,7 +597,11 @@ def generate_movie_message(movie_doc, base_name):
         if file.get("season") and file.get("episode"):
             season = file["season"]
             episode = file["episode"]
-            episodes_by_season[season].add(episode)
+            if season not in episodes_by_season:
+                episodes_by_season[season] = {}
+            if episode not in episodes_by_season[season]:
+                episodes_by_season[season][episode] = 0
+            episodes_by_season[season][episode] += 1
 
     primary_tag = "#SERIES" if "#SERIES" in all_tags else "#MOVIE"
     content_type = "SERIES" if "#SERIES" in all_tags else "MOVIE"
@@ -568,16 +618,13 @@ def generate_movie_message(movie_doc, base_name):
     caption_lines.append("<blockquote>🚀 Telegram Files ✨</blockquote>")
     caption_lines.append("")
     
-    # Group by resolution and HEVC label
     grouped_by_label = {}
     for quality, files_for_quality in quality_files.items():
-        # Determine HEVC for each file and bucket into label-specific groups
         for fi in files_for_quality:
             is_hevc = False
             fname_lower = fi['filename'].lower()
             if 'hevc' in fname_lower:
                 is_hevc = True
-            # Build label like '720p' or '720p HEVC'
             base_label = quality.lower()
             label = f"{base_label} HEVC" if is_hevc else base_label
             if label not in grouped_by_label:
@@ -595,57 +642,73 @@ def generate_movie_message(movie_doc, base_name):
         files_for_label = grouped_by_label[label]
         if not files_for_label:
             continue
-        # Sort by size desc so larger files first
-        files_for_label.sort(key=lambda x: x.get('file_size', 0), reverse=True)
+        
+        if primary_tag == "#SERIES":
+            def sort_by_episode(f):
+                ep = f.get('episode', 'E99')
+                if ep and ep.startswith('E'):
+                    try:
+                        # Handle combined episodes like "Combined [E01-E10]"
+                        if 'Combined' in ep:
+                            match = re.search(r'E(\d{2})-E(\d{2})', ep)
+                            if match:
+                                return int(match.group(1))
+                        # Handle single episodes like "E01"
+                        return int(ep[1:].split('-')[0])
+                    except:
+                        return 999
+                return 999
+            
+            files_for_label.sort(key=sort_by_episode)
+        else:
+            files_for_label.sort(key=lambda x: x.get('file_size', 0), reverse=True)
+        
         size_links = []
         for file_info in files_for_label:
             size_str = get_file_size_mb(file_info.get('file_size', 0))
-            link = f'<a href="https://telegram.me/{temp.U_NAME}?start=file_{MOVIE_UPDATE_CHANNEL}_{file_info["file_id"]}">{size_str}</a>'
+            ep_label = file_info.get('episode', '')
+            
+            if primary_tag == "#SERIES" and ep_label:
+                # Check if it's a combined episode
+                if 'Combined' in ep_label:
+                    link_text = f"{ep_label} {size_str}"
+                else:
+                    link_text = f"{ep_label} [{size_str}]"
+            else:
+                link_text = size_str
+            
+            link = f'<a href="https://telegram.me/{temp.U_NAME}?start=file_{MOVIE_UPDATE_CHANNEL}_{file_info["file_id"]}">{link_text}</a>'
             size_links.append(link)
+        
         caption_lines.append(f"📦 {label} : {' | '.join(size_links)}")
         caption_lines.append("")
     
     if episodes_by_season:
         caption_lines.append("📺 Episodes Available:")
-        for season, episodes in sorted(episodes_by_season.items(), key=lambda x: int(x[0])):
-            singles = []
-            ranges = []
-
+        for season in sorted(episodes_by_season.keys()):
+            episodes = sorted(episodes_by_season[season].keys())
+            ep_display = []
             for ep in episodes:
-                if "-" in ep:
-                    ranges.append(ep)
+                if '-' in ep and 'Combined' not in ep:
+                    ep_display.append(ep)
+                elif 'Combined' in ep:
+                    # Extract just the range from Combined [E01-E10]
+                    match = re.search(r'Combined\s*\[(.*?)\]', ep)
+                    if match:
+                        ep_display.append(f"Combined [{match.group(1)}]")
+                    else:
+                        ep_display.append(ep)
                 else:
-                    try:
-                        singles.append(int(ep))
-                    except ValueError:
-                        ranges.append(ep)
-
-            singles.sort()
-            collapsed = []
-            start = end = None
-            for num in singles:
-                if start is None:
-                    start = end = num
-                elif num == end + 1:
-                    end = num
-                else:
-                    collapsed.append(str(start) if start == end else f"{start}-{end}")
-                    start = end = num
-            if start is not None:
-                collapsed.append(str(start) if start == end else f"{start}-{end}")
-
-            all_ep_parts = collapsed + sorted(ranges, key=lambda s: int(s.split("-")[0]))
-            caption_lines.append(f"Season {int(season)}: Episodes {', '.join(all_ep_parts)}")
+                    ep_display.append(ep)
+            caption_lines.append(f"Season {season}: {', '.join(ep_display)}")
         caption_lines.append("")
     
     caption_lines.append("<blockquote>〽️ Powered by @WOLVERIN_P</blockquote>")
     
     text = "\n".join(caption_lines)
     
-    # Add Movie Search Group button
     buttons = [
         [InlineKeyboardButton("🔰𝐌𝐨𝐯𝐢𝐞 𝐒𝐞𝐚𝐫𝐜𝐡 𝐆𝐫𝐨𝐮𝐩🔰", url="https://t.me/thinkfilmy")]
     ]
     
     return text, InlineKeyboardMarkup(buttons)
-    
