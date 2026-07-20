@@ -47,6 +47,7 @@ class temp(object):
     IMDB_CAP = {}
     VERIFICATIONS = {}
     TEMP_INVITE_LINKS = {}
+    listx_to_str = list_to_str
 
 async def is_req_subscribed(bot, user_id, rqfsub_channels):
     btn = []
