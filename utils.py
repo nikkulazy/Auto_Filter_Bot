@@ -625,3 +625,4 @@ async def get_cap(settings, remaining_seconds, files, query, total_results, sear
         logging.error(f"Error in get_cap: {e}")
         pass
        
+listx_to_str = list_to_str
