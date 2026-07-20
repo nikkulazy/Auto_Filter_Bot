@@ -167,6 +167,13 @@ def extract_media_info(filename: str, caption: str):
     language = ", ".join(sorted({CAPTION_LANGUAGES[k] for k in lang_keys})) if lang_keys else "N/A"
 
     season, episode = extract_season_episode(filename)
+    
+    # Agar COMBINED hai toh episode ko "Combined" set karo
+    if "COMBINED" in filename.upper() or (caption and "COMBINED" in caption.upper()):
+        episode = "Combined"
+        if season is None:
+            season = 1
+
     if season is not None:
         tag = "#SERIES"
         if m := (RANGE_REGEX.search(filename) or SINGLE_REGEX.search(filename) or NAMED_REGEX.search(filename) or EP_ONLY_RANGE.search(filename)):
@@ -646,9 +653,15 @@ def generate_movie_message(movie_doc, base_name):
             # Episode text (clickable nahi), Size clickable
             episode_text = ""
             if file_info.get("episode"):
-                episode_text = f'E{file_info["episode"]}'
+                if file_info["episode"] == "Combined":
+                    episode_text = "Combined"
+                else:
+                    episode_text = f'EP{file_info["episode"]}'
             elif file_info.get("season") and file_info.get("episode"):
-                episode_text = f'S{file_info["season"]}E{file_info["episode"]}'
+                if file_info["episode"] == "Combined":
+                    episode_text = "Combined"
+                else:
+                    episode_text = f'S{file_info["season"]}EP{file_info["episode"]}'
 
             if episode_text:
                 # Episode TEXT (clickable nahi), Size CLICKABLE
