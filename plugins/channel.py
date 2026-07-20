@@ -198,6 +198,22 @@ def extract_media_info(filename: str, caption: str):
     lang_keys = {k for k in CAPTION_LANGUAGES if k in caption_clean or k in filename.lower()}
     language = ", ".join(sorted({CAPTION_LANGUAGES[k] for k in lang_keys})) if lang_keys else "N/A"
 
+    # Words to remove from title
+    REMOVE_WORDS = {
+        'web', 'dl', 'aac', 'ac3', 'ddp', 'dd', 'eac3', 'atmos',
+        'h264', 'h265', 'hevc', 'x264', 'x265', '10bit', '8bit',
+        'amzn', 'netflix', 'hotstar', 'zee5', 'sonyliv', 'prime',
+        'webrip', 'web-dl', 'bluray', 'brrip', 'bdrip', 'dvdrip',
+        'hdtv', 'tvrip', 'camrip', 'hdrip', 'hq', 'real', 'jc',
+        'psa', 'ark', 'rtx', 'mkv', 'mp4', 'avi', 'mov',
+        'web', 'dl', 'aac', 'ac3', 'ddp', 'dd', 'eac3', 'atmos',
+        'h264', 'h265', 'hevc', 'x264', 'x265', '10bit', '8bit',
+        'amzn', 'netflix', 'hotstar', 'zee5', 'sonyliv', 'prime',
+        'webrip', 'web-dl', 'bluray', 'brrip', 'bdrip', 'dvdrip',
+        'hdtv', 'tvrip', 'camrip', 'hdrip', 'hq', 'real', 'jc',
+        'psa', 'ark', 'rtx', 'mkv', 'mp4', 'avi', 'mov'
+    }
+
     # Extract season and episode with display format
     season, episode_display, episode_number, is_combined = extract_season_episode(filename)
     
@@ -226,7 +242,15 @@ def extract_media_info(filename: str, caption: str):
         for pattern in patterns_to_remove:
             temp_filename = re.sub(pattern, '', temp_filename, flags=re.IGNORECASE)
         
-        processed_raw = temp_filename.strip()
+        # Remove common words from title
+        temp_words = temp_filename.split()
+        clean_words = []
+        for word in temp_words:
+            if word.lower() not in REMOVE_WORDS:
+                clean_words.append(word)
+        temp_filename = ' '.join(clean_words).strip()
+        
+        processed_raw = temp_filename
         base_raw = processed_raw
         
         if year_match := YEAR_PATTERN.search(temp_filename):
@@ -249,6 +273,15 @@ def extract_media_info(filename: str, caption: str):
                 if qual_idx != -1:
                     processed_raw = filename[:qual_idx]
                     base_raw = processed_raw
+        
+        # Remove common words for movies too
+        temp_words = base_raw.split()
+        clean_words = []
+        for word in temp_words:
+            if word.lower() not in REMOVE_WORDS:
+                clean_words.append(word)
+        base_raw = ' '.join(clean_words).strip()
+        processed_raw = base_raw
 
     base_name = normalize(remove_ignored_words(normalize(base_raw)))
     if year and year not in base_name:
@@ -258,6 +291,19 @@ def extract_media_info(filename: str, caption: str):
         base_name = re.sub(r"\s+\(\d{4}\)$", "", base_name)
         if year:
             base_name += f" ({year})"
+
+    # Final cleanup - Remove extra words
+    final_clean_words = {
+        'web', 'dl', 'aac', 'ac3', 'ddp', 'dd', 'eac3', 'atmos',
+        'h264', 'h265', 'hevc', 'x264', 'x265', '10bit', '8bit',
+        'amzn', 'netflix', 'hotstar', 'zee5', 'sonyliv', 'prime',
+        'webrip', 'web-dl', 'bluray', 'brrip', 'bdrip', 'dvdrip',
+        'hdtv', 'tvrip', 'camrip', 'hdrip', 'hq', 'real', 'jc',
+        'psa', 'ark', 'rtx', 'mkv', 'mp4', 'avi', 'mov'
+    }
+    words = base_name.split()
+    clean_words = [w for w in words if w.lower() not in final_clean_words]
+    base_name = ' '.join(clean_words).strip()
 
     return {
         "processed": normalize(processed_raw),
@@ -563,7 +609,6 @@ def generate_movie_message(movie_doc, base_name):
     all_languages = set()
     all_tags = set()
     episodes_by_season = defaultdict(dict)
-    episode_files = {}
 
     for file in movie_doc["files"]:
         file_qualities = []
@@ -648,12 +693,10 @@ def generate_movie_message(movie_doc, base_name):
                 ep = f.get('episode', 'E99')
                 if ep and ep.startswith('E'):
                     try:
-                        # Handle combined episodes like "Combined [E01-E10]"
                         if 'Combined' in ep:
                             match = re.search(r'E(\d{2})-E(\d{2})', ep)
                             if match:
                                 return int(match.group(1))
-                        # Handle single episodes like "E01"
                         return int(ep[1:].split('-')[0])
                     except:
                         return 999
@@ -669,7 +712,6 @@ def generate_movie_message(movie_doc, base_name):
             ep_label = file_info.get('episode', '')
             
             if primary_tag == "#SERIES" and ep_label:
-                # Check if it's a combined episode
                 if 'Combined' in ep_label:
                     link_text = f"{ep_label} {size_str}"
                 else:
@@ -692,7 +734,6 @@ def generate_movie_message(movie_doc, base_name):
                 if '-' in ep and 'Combined' not in ep:
                     ep_display.append(ep)
                 elif 'Combined' in ep:
-                    # Extract just the range from Combined [E01-E10]
                     match = re.search(r'Combined\s*\[(.*?)\]', ep)
                     if match:
                         ep_display.append(f"Combined [{match.group(1)}]")
