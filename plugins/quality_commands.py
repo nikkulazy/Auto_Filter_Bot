@@ -1,4 +1,5 @@
 # plugins/quality_commands.py
+
 import re
 import logging
 from datetime import datetime
@@ -6,14 +7,15 @@ from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from info import ADMINS, LOG_CHANNEL, MULTIPLE_DB
 from database.ia_filterdb import Media, Media2
+
+# ✅ FIXED IMPORTS - send_upgrade_notification nahi hai, isliye hataya
 from plugins.quality_upgrade import (
     BAD_QUALITY_KEYWORDS,
     GOOD_QUALITY_KEYWORDS,
     is_bad_quality,
     is_good_quality,
     get_movie_base_name,
-    find_and_delete_bad_quality_files,
-    send_upgrade_notification
+    find_and_delete_bad_quality_files
 )
 
 logger = logging.getLogger(__name__)
@@ -51,7 +53,6 @@ async def clean_bad_quality(bot, message):
             except Exception as e:
                 logger.error(f"Failed to delete {doc.file_name}: {e}")
             
-            # प्रोग्रेस अपडेट करें
             if processed % 50 == 0:
                 await msg.edit(
                     f"🔄 Processing...\n"
@@ -59,7 +60,7 @@ async def clean_bad_quality(bot, message):
                     f"📊 Processed: {processed}"
                 )
         
-        # SECONDARY DB (अगर MULTIPLE_DB ऑन है)
+        # SECONDARY DB
         if MULTIPLE_DB:
             cursor2 = Media2.find(query)
             async for doc in cursor2:
@@ -85,13 +86,13 @@ async def clean_bad_quality(bot, message):
             f"📊 Total Processed: {processed}"
         )
         
-        # लॉग भेजें
-        await bot.send_message(
-            LOG_CHANNEL,
-            f"🧹 **Manual Cleanup Completed**\n\n"
-            f"🗑️ Deleted: {total_deleted}\n"
-            f"👤 By: {message.from_user.mention}"
-        )
+        if LOG_CHANNEL:
+            await bot.send_message(
+                LOG_CHANNEL,
+                f"🧹 **Manual Cleanup Completed**\n\n"
+                f"🗑️ Deleted: {total_deleted}\n"
+                f"👤 By: {message.from_user.mention}"
+            )
         
     except Exception as e:
         await msg.edit(f"❌ Error: {e}")
@@ -123,7 +124,6 @@ async def check_quality(bot, message):
     msg = await message.reply(f"🔍 Searching for: {base_name}...")
     
     try:
-        # Query बनाएं
         base_name_escaped = re.escape(base_name)
         search_pattern = re.compile(base_name_escaped, re.IGNORECASE)
         
@@ -149,7 +149,6 @@ async def check_quality(bot, message):
                 elif is_good_quality(doc.file_name):
                     good_files.append(doc.file_name)
         
-        # रिप्लाई बनाएं
         response = f"📊 **Quality Check: {base_name}**\n\n"
         response += f"🔴 **Bad Quality (CAM/Dubbing):** {len(bad_files)} files\n"
         if bad_files:
@@ -165,7 +164,6 @@ async def check_quality(bot, message):
             if len(good_files) > 10:
                 response += f"  • ... and {len(good_files) - 10} more\n"
         
-        # बटन जोड़ें
         buttons = []
         if bad_files:
             buttons.append([
@@ -195,7 +193,6 @@ async def delete_bad_quality_callback(bot, query):
     """
     user_id = query.from_user.id
     
-    # चेक करें कि एडमिन है या नहीं
     if user_id not in ADMINS:
         await query.answer("❌ You're not authorized!", show_alert=True)
         return
@@ -206,7 +203,6 @@ async def delete_bad_quality_callback(bot, query):
     await query.message.edit(f"🗑️ Deleting bad quality files for: {base_name}")
     
     try:
-        # फाइल्स डिलीट करें
         result = await find_and_delete_bad_quality_files(bot, base_name, "")
         
         if result["deleted"] > 0:
@@ -214,15 +210,6 @@ async def delete_bad_quality_callback(bot, query):
                 f"✅ **Deleted Successfully!**\n\n"
                 f"📂 {base_name}\n"
                 f"🗑️ Deleted: {result['deleted']} bad quality files"
-            )
-            
-            # लॉग भेजें
-            await send_upgrade_notification(
-                bot,
-                base_name,
-                "Manual Delete",
-                result["deleted"],
-                result["files"]
             )
         else:
             await query.message.edit(
