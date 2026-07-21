@@ -15,6 +15,9 @@ from pymongo.errors import PyMongoError, DuplicateKeyError
 from pyrogram.errors import MessageIdInvalid, MessageNotModified, FloodWait
 from typing import Optional, Tuple
 
+# ✅ QUALITY UPGRADE IMPORT
+from plugins.quality_upgrade import find_and_delete_bad_quality_files, is_good_quality, get_movie_base_name
+
 logger = logging.getLogger(__name__)
 
 # Precomputed sets for faster lookups
@@ -88,13 +91,6 @@ MEDIA_FILTER = filters.document | filters.video | filters.audio
 locks = defaultdict(asyncio.Lock)
 pending_updates = {}
 
-# Queue system for processing
-processing_queue = defaultdict(asyncio.Queue)
-is_processing = defaultdict(bool)
-
-# Global error_tmdb variable
-error_tmdb = False
-
 
 def clean_mentions_links(text: str) -> str:
     return CLEAN_PATTERN.sub("", text or "").strip()
@@ -167,13 +163,6 @@ def extract_media_info(filename: str, caption: str):
     language = ", ".join(sorted({CAPTION_LANGUAGES[k] for k in lang_keys})) if lang_keys else "N/A"
 
     season, episode = extract_season_episode(filename)
-    
-    # Agar COMBINED hai toh episode ko "Combined" set karo
-    if "COMBINED" in filename.upper() or (caption and "COMBINED" in caption.upper()):
-        episode = "Combined"
-        if season is None:
-            season = 1
-
     if season is not None:
         tag = "#SERIES"
         if m := (RANGE_REGEX.search(filename) or SINGLE_REGEX.search(filename) or NAMED_REGEX.search(filename) or EP_ONLY_RANGE.search(filename)):
@@ -243,175 +232,189 @@ async def media_handler(bot, message):
 
     try:
         if await db.movie_update_status(bot.me.id):
-            # Extract base name first
-            media_info = extract_media_info(media.file_name, media.caption)
-            base_name = media_info["base_name"]
-            
-            # Add to queue for this movie
-            await processing_queue[base_name].put((media, media_info))
-            
-            # Start processing if not already running
-            if not is_processing[base_name]:
-                asyncio.create_task(process_queue(bot, base_name))
+            await process_and_send_update(bot, media.file_name, media.caption, media)
     except Exception:
         logger.exception("Error processing media")
 
-async def process_queue(bot, base_name):
-    """Process all files for a movie in sequence"""
-    is_processing[base_name] = True
-    
+async def process_and_send_update(bot, filename, caption, media):
     try:
-        while not processing_queue[base_name].empty():
-            media, media_info = await processing_queue[base_name].get()
-            
-            # Process this file
-            await process_single_file(bot, media, media_info, base_name)
-            
-            # Small delay to avoid flood
-            await asyncio.sleep(0.5)
-            
+        media_info = extract_media_info(filename, caption)
+        base_name = media_info["base_name"]
+        processed = media_info["processed"]
+
+        lock = locks[base_name]
+        async with lock:
+            await _process_with_lock(bot, filename, caption, media_info, base_name, processed, media)
+    except PyMongoError as e:
+        logger.error("Database error: %s", e)
     except Exception as e:
-        logger.error(f"Queue processing error for {base_name}: {e}")
-    finally:
-        is_processing[base_name] = False
-        # Clean up queue
-        if processing_queue[base_name].empty():
-            del processing_queue[base_name]
+        logger.exception("Processing failed: %s", e)
 
-async def process_single_file(bot, media, media_info, base_name):
-    """Process a single file"""
-    try:
-        filename = media.file_name
-        caption = media.caption
-        
-        # Check if movie already exists
-        movie_doc = await db.movie_updates.find_one({"_id": base_name})
-        
-        try:
-            file_id, _ = unpack_new_file_id(media.file_id)
-        except Exception:
-            file_id = "unknown_id"
+# ============================================================
+# ✅ MODIFIED: _process_with_lock with Quality Upgrade
+# ============================================================
+async def _process_with_lock(bot, filename, caption, media_info, base_name, processed, media):
+    if not hasattr(db, 'movie_updates'):
+        db.movie_updates = db.db.movie_updates
 
-        file_size = media.file_size if hasattr(media, "file_size") else 0
+    movie_doc = await db.movie_updates.find_one({"_id": base_name})
 
-        file_data = {
-            "filename": filename,
-            "processed": media_info["processed"],
-            "quality": media_info["quality"],
-            "language": media_info["language"],
-            "ott_platform": media_info["ott_platform"],
-            "timestamp": datetime.now(),
-            "tag": media_info["tag"],
-            "season": media_info["season"],
-            "episode": media_info["episode"],
-            "file_id": file_id,
-            "file_size": file_size
-        }
-
-        # Movie does not exist yet - Create NEW post
-        if not movie_doc:
-            await create_new_movie_post(bot, base_name, media_info, file_data, media)
-        else:
-            # Movie exists - Add file to existing post
-            await add_file_to_existing_movie(bot, base_name, movie_doc, file_data)
-            
-    except Exception as e:
-        logger.error(f"Error processing single file: {e}")
-
-async def create_new_movie_post(bot, base_name, media_info, file_data, media):
-    """Create a new movie post with first file"""
     global error_tmdb
-    
-    if TMDB_POSTER:
-        details = await get_movie_detailsx(base_name)
-        if not details or details.get("error"):
-            error_tmdb = True
-            logger.info(f"TMDB failed for '{base_name}', switching to IMDb")
-            details = await get_movie_details(base_name) or {}
-    else:
-        details = await get_movie_details(base_name) or {}
+    error_tmdb = False
 
-    if not details:
-        details = {}
+    try:
+        file_id, _ = unpack_new_file_id(media.file_id)
+    except Exception:
+        file_id = "unknown_id"
 
-    raw_genres = details.get("genres", "N/A")
-    if isinstance(raw_genres, str):
-        genre_list = [g.strip() for g in raw_genres.split(",")]
-        genres = ", ".join(g for g in genre_list if g in STANDARD_GENRES) or "N/A"
-    else:
-        genres = ", ".join(g for g in raw_genres if g in STANDARD_GENRES) or "N/A"
+    file_size = media.file_size if hasattr(media, "file_size") else 0
 
-    movie_doc = {
-        "_id": base_name,
-        "files": [file_data],
-        "poster_url": (
-            details.get("backdrop_url")
-            if LANDSCAPE_POSTER and TMDB_POSTER and not error_tmdb
-            else details.get("poster_url")
-        ),
-        "genres": genres,
-        "rating": details.get("rating", "N/A"),
-        "imdb_url": (
-            details.get("tmdb_url")
-            if TMDB_POSTER and not error_tmdb
-            else details.get("url", "")
-        ),
-        "year": media_info["year"] or details.get("year"),
-        "tag": media_info["tag"],
+    file_data = {
+        "filename": filename,
+        "processed": processed,
+        "quality": media_info["quality"],
+        "language": media_info["language"],
         "ott_platform": media_info["ott_platform"],
-        "message_id": None,
-        "is_photo": False
+        "timestamp": datetime.now(),
+        "tag": media_info["tag"],
+        "season": media_info["season"],
+        "episode": media_info["episode"],
+        "file_id": file_id,
+        "file_size": file_size
     }
 
-    try:
-        await db.movie_updates.insert_one(movie_doc)
-        # Send the post
-        await send_movie_update(bot, base_name)
-    except DuplicateKeyError:
-        # Movie created by another process
-        movie_doc = await db.movie_updates.find_one({"_id": base_name})
-        if movie_doc:
-            await add_file_to_existing_movie(bot, base_name, movie_doc, file_data)
+    # Movie does not exist yet
+    if not movie_doc:
 
-async def add_file_to_existing_movie(bot, base_name, movie_doc, file_data):
-    """Add file to existing movie and UPDATE the same post"""
-    
-    # Check if file already exists
-    for existing_file in movie_doc["files"]:
-        if existing_file["filename"] == file_data["filename"]:
-            logger.info(f"File '{file_data['filename']}' already exists, skipping")
-            return
-        
-        # Check for duplicate quality
-        if (file_data.get("tag") == "#SERIES" and
-            existing_file.get("season") == file_data.get("season") and
-            existing_file.get("episode") == file_data.get("episode") and
-            existing_file.get("quality") == file_data.get("quality")):
-            logger.info(f"Same quality already exists, skipping")
-            return
-        
-        if (file_data.get("tag") == "#MOVIE" and
-            existing_file.get("quality") == file_data.get("quality")):
-            logger.info(f"Same quality already exists, skipping")
-            return
+        if TMDB_POSTER:
+            details = await get_movie_detailsx(base_name)
 
-    # Add file to database
-    await db.movie_updates.update_one(
-        {"_id": base_name},
-        {"$push": {"files": file_data}}
-    )
-    
-    # UPDATE the existing post (not create new)
-    if movie_doc.get("message_id"):
-        await update_movie_message(bot, base_name)
+            if not details or details.get("error"):
+                error_tmdb = True
+                logger.info(
+                    f"TMDB failed for '{base_name}', switching to IMDb"
+                )
+                details = await get_movie_details(base_name) or {}
+
+        else:
+            details = await get_movie_details(base_name) or {}
+
+        if not details:
+            details = {}
+
+        raw_genres = details.get("genres", "N/A")
+
+        if isinstance(raw_genres, str):
+            genre_list = [g.strip() for g in raw_genres.split(",")]
+            genres = ", ".join(
+                g for g in genre_list
+                if g in STANDARD_GENRES
+            ) or "N/A"
+        else:
+            genres = ", ".join(
+                g for g in raw_genres
+                if g in STANDARD_GENRES
+            ) or "N/A"
+
+        movie_doc = {
+            "_id": base_name,
+            "files": [file_data],
+            "poster_url": (
+                details.get("backdrop_url")
+                if LANDSCAPE_POSTER
+                and TMDB_POSTER
+                and not error_tmdb
+                else details.get("poster_url")
+            ),
+            "genres": genres,
+            "rating": details.get("rating", "N/A"),
+            "imdb_url": (
+                details.get("tmdb_url")
+                if TMDB_POSTER and not error_tmdb
+                else details.get("url", "")
+            ),
+            "year": media_info["year"] or details.get("year"),
+            "tag": media_info["tag"],
+            "ott_platform": media_info["ott_platform"],
+            "message_id": None,
+            "is_photo": False
+        }
+
+        try:
+            await db.movie_updates.insert_one(movie_doc)
+
+            await send_movie_update(bot, base_name)
+
+            movie_doc = await db.movie_updates.find_one(
+                {"_id": base_name}
+            )
+
+        except DuplicateKeyError:
+
+            movie_doc = await db.movie_updates.find_one(
+                {"_id": base_name}
+            )
+
+            if movie_doc:
+
+                if any(
+                    f["filename"] == filename
+                    for f in movie_doc["files"]
+                ):
+                    return
+
+                await db.movie_updates.update_one(
+                    {"_id": base_name},
+                    {"$push": {"files": file_data}}
+                )
+
+                movie_doc["files"].append(file_data)
+
+                schedule_update(bot, base_name)
+
     else:
-        # If no message exists, send new one
-        await send_movie_update(bot, base_name)
+
+        if any(
+            f["filename"] == filename
+            for f in movie_doc["files"]
+        ):
+            return
+
+        await db.movie_updates.update_one(
+            {"_id": base_name},
+            {"$push": {"files": file_data}}
+        )
+
+        movie_doc["files"].append(file_data)
+
+        schedule_update(bot, base_name)
+
+    # ============================================================
+    # ✅ QUALITY UPGRADE CHECK - NEW CODE ADDED
+    # ============================================================
+    if movie_doc:
+        if is_good_quality(filename):
+            movie_base_name = get_movie_base_name(filename)
+            if movie_base_name:
+                try:
+                    delete_result = await find_and_delete_bad_quality_files(
+                        bot, 
+                        movie_base_name, 
+                        filename
+                    )
+                    if delete_result["deleted"] > 0:
+                        logger.info(
+                            f"✅ [CHANNEL] Quality upgraded for '{movie_base_name}': "
+                            f"Deleted {delete_result['deleted']} CAM/Theatre files"
+                        )
+                        # Movie message refresh karein
+                        await schedule_update(bot, movie_base_name, delay=2)
+                except Exception as e:
+                    logger.error(f"Quality upgrade failed for {movie_base_name}: {e}")
 
 async def send_movie_update(bot, base_name):
-    global error_tmdb
-    
     max_retries = 3
+    base_delay = 5
     for attempt in range(max_retries):
         try:
             movie_doc = await db.movie_updates.find_one({"_id": base_name})
@@ -459,17 +462,14 @@ async def send_movie_update(bot, base_name):
                     {"$set": {"message_id": msg.id, "is_photo": is_photo}}
                 )
             return msg
-            
         except FloodWait as e:
             wait_time = e.value + 2
             await asyncio.sleep(wait_time)
-            # Don't increment attempt, just retry with updated wait time
-            
         except Exception as e:
             logger.error(f"Failed to send movie update: {e}")
             break
-            
     return None
+
 
 async def update_movie_message(bot, base_name):
     try:
@@ -506,21 +506,9 @@ async def update_movie_message(bot, base_name):
                     disable_web_page_preview=not LINK_PREVIEW
                 )
             return
-            
-        except MessageNotModified:
-            # Message already has same content, no changes needed
+        except (MessageIdInvalid, MessageNotModified):
             pass
-            
-        except MessageIdInvalid:
-            # Message ID invalid, create new message
-            await db.movie_updates.update_one(
-                {"_id": base_name},
-                {"$set": {"message_id": None, "is_photo": False}}
-            )
-            await send_movie_update(bot, base_name)
-            
-        except Exception as e:
-            logger.error(f"Failed to update movie message: {e}")
+        except Exception:
             try:
                 await bot.delete_messages(
                     chat_id=MOVIE_UPDATE_CHANNEL,
@@ -533,7 +521,6 @@ async def update_movie_message(bot, base_name):
             except Exception:
                 pass
             await send_movie_update(bot, base_name)
-            
     except Exception as e:
         logger.error(f"Failed to update movie message: {e}")
 
@@ -564,13 +551,12 @@ def generate_movie_message(movie_doc, base_name):
 
     for file in movie_doc["files"]:
         file_qualities = []
-        
         if file.get("quality") and file["quality"] != "N/A":
             file_qualities = extract_resolutions_from_text(file["quality"]) or []
         if not file_qualities:
             file_qualities = extract_resolutions_from_text(file["filename"]) or []
         if not file_qualities:
-            file_qualities = ["N/A"]
+            continue
 
         for quality in file_qualities:
             if quality not in quality_files:
@@ -581,9 +567,7 @@ def generate_movie_message(movie_doc, base_name):
                 'file_id': file.get('file_id', 'unknown_id'),
                 'file_size': file.get('file_size', 0),
                 'language': file.get("language", "N/A"),
-                'ott_platform': file.get("ott_platform", "N/A"),
-                'season': file.get("season"),
-                'episode': file.get("episode")
+                'ott_platform': file.get("ott_platform", "N/A")
             })
 
         if file.get("language") and file["language"] != "N/A":
@@ -612,20 +596,16 @@ def generate_movie_message(movie_doc, base_name):
     caption_lines.append("<blockquote>🚀 Telegram Files ✨</blockquote>")
     caption_lines.append("")
     
+    # Group by resolution and HEVC label
     grouped_by_label = {}
     for quality, files_for_quality in quality_files.items():
         for fi in files_for_quality:
             is_hevc = False
             fname_lower = fi['filename'].lower()
-            if 'hevc' in fname_lower or 'x265' in fname_lower or 'h265' in fname_lower:
+            if 'hevc' in fname_lower:
                 is_hevc = True
-            
             base_label = quality.lower()
-            if base_label == "n/a":
-                base_label = "Unknown"
-                
             label = f"{base_label} HEVC" if is_hevc else base_label
-            
             if label not in grouped_by_label:
                 grouped_by_label[label] = []
             grouped_by_label[label].append(fi)
@@ -637,38 +617,16 @@ def generate_movie_message(movie_doc, base_name):
         m = re.search(r'(\d+)p', ll)
         return -int(m.group(1)) if m else -1
 
-    sorted_labels = sorted(grouped_by_label.keys(), key=_sort_group_key)
-    
-    for label in sorted_labels:
+    for label in sorted(grouped_by_label.keys(), key=_sort_group_key):
         files_for_label = grouped_by_label[label]
         if not files_for_label:
             continue
-            
         files_for_label.sort(key=lambda x: x.get('file_size', 0), reverse=True)
-        
         size_links = []
         for file_info in files_for_label:
             size_str = get_file_size_mb(file_info.get('file_size', 0))
-            
-            # Episode text (clickable nahi), Size clickable
-            episode_text = ""
-            if file_info.get("episode"):
-                if file_info["episode"] == "Combined":
-                    episode_text = "Combined"
-                else:
-                    episode_text = f'EP{file_info["episode"]}'
-            elif file_info.get("season") and file_info.get("episode"):
-                if file_info["episode"] == "Combined":
-                    episode_text = "Combined"
-                else:
-                    episode_text = f'S{file_info["season"]}EP{file_info["episode"]}'
-
-            if episode_text:
-                # Episode TEXT (clickable nahi), Size CLICKABLE
-                size_links.append(f'{episode_text} [<a href="https://telegram.me/{temp.U_NAME}?start=file_{MOVIE_UPDATE_CHANNEL}_{file_info["file_id"]}">{size_str}</a>]')
-            else:
-                size_links.append(f'<a href="https://telegram.me/{temp.U_NAME}?start=file_{MOVIE_UPDATE_CHANNEL}_{file_info["file_id"]}">{size_str}</a>')
-        
+            link = f'<a href="https://telegram.me/{temp.U_NAME}?start=file_{MOVIE_UPDATE_CHANNEL}_{file_info["file_id"]}">{size_str}</a>'
+            size_links.append(link)
         caption_lines.append(f"📦 {label} : {' | '.join(size_links)}")
         caption_lines.append("")
     
@@ -710,28 +668,7 @@ def generate_movie_message(movie_doc, base_name):
     text = "\n".join(caption_lines)
     
     buttons = [
-        [InlineKeyboardButton("🔰𝐌𝐨𝐯𝐢𝐞 𝐒𝐞𝐚𝐫𝐜𝐡 𝐆𝐫𝐨𝐮𝐩🔰", url="https://t.me/thinkfilmy")],
-        [InlineKeyboardButton("🔞 Masti Time Bot 🔞", url="https://t.me/Fliestoras_bot")]
+        [InlineKeyboardButton("🔰𝐌𝐨𝐯𝐢𝐞 𝐒𝐞𝐚𝐫𝐜𝐡 𝐆𝐫𝐨𝐮𝐩🔰", url="https://t.me/thinkfilmy")]
     ]
     
     return text, InlineKeyboardMarkup(buttons)
-
-# ============================================
-# LEGACY FUNCTION FOR INDEX.PY COMPATIBILITY
-# ============================================
-
-async def process_and_send_update(bot, filename, caption, media):
-    """Legacy function for index.py compatibility"""
-    try:
-        media_info = extract_media_info(filename, caption)
-        base_name = media_info["base_name"]
-        
-        # Add to queue for processing
-        await processing_queue[base_name].put((media, media_info))
-        
-        # Start processing if not already running
-        if not is_processing[base_name]:
-            asyncio.create_task(process_queue(bot, base_name))
-            
-    except Exception as e:
-        logger.error(f"Error in process_and_send_update: {e}")
