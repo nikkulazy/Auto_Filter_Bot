@@ -198,7 +198,7 @@ async def start(client, message):
                     InlineKeyboardButton(' Help 🎭', callback_data='help'),
                     InlineKeyboardButton(' About ♻️', callback_data='about')
                 ],[
-                    InlineKeyboardButton(' Mᴏᴠɪᴇ Gᴜɪᴅᴇ', url='http://t.me/wolverine273_bot/app2'),
+                    InlineKeyboardButton(' Mᴏᴠɪᴇ Gᴜɪᴅᴇ', url='http://t.me/Misslazy_bot/app'),
                     InlineKeyboardButton(' Uᴘɢʀᴀᴅᴇ 🎟', callback_data="premium_info"),
                 ]]
         reply_markup = InlineKeyboardMarkup(buttons)
