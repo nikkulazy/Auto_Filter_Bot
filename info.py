@@ -29,6 +29,7 @@ CACHE_TIME = int(environ.get('CACHE_TIME', 300))    # Cache time in seconds (def
 USE_CAPTION_FILTER = bool(environ.get('USE_CAPTION_FILTER', True))  # Use caption filter for search results (default: True)
 INDEX_CAPTION = bool(environ.get('SAVE_CAPTION', True)) # Save caption db when idexing make it False if you dont use USE_CAPTION_FILTER for search results (default: True)
 COVERX = is_enabled(environ.get('COVERX', "True"), True)
+ULTRA_FAST_MODE = bool(environ.get('ULTRA_FAST_MODE', True))
 #Making it false will not save caption in db SO you can save some storage space
 
 
