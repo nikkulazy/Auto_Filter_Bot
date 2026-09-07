@@ -8,25 +8,18 @@ from collections import defaultdict
 from pymongo.errors import DuplicateKeyError
 from umongo import Instance, Document, fields
 from motor.motor_asyncio import AsyncIOMotorClient
+from marshmallow import ValidationError
+from info import *
 from utils import get_settings, save_group_settings
-from info import (
-    COLLECTION_NAME, COVERX, DATABASE_NAME, DATABASE_URI, DATABASE_URI2,
-    INDEX_CAPTION, MAX_B_TN, MULTIPLE_DB, ULTRA_FAST_MODE, USE_CAPTION_FILTER,
-)
 from datetime import datetime, timedelta
-import asyncio
-from functools import lru_cache
-
+import logging
 
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 # ---------------------------------------------------------
 
 # Global cache for DB size
 _db_stats_cache = {"timestamp": None, "primary_size": 0.0}
-
-@lru_cache(maxsize=4096)
-def compile_regex(pattern):
-    return re.compile(pattern, re.IGNORECASE)
 
 # Primary DB
 client = AsyncIOMotorClient(DATABASE_URI)
@@ -34,27 +27,20 @@ db = client[DATABASE_NAME]
 instance = Instance.from_db(db)
 
 # secondary db
-if MULTIPLE_DB and DATABASE_URI2:
-    client2 = AsyncIOMotorClient(DATABASE_URI2)
-    db2 = client2[DATABASE_NAME]
-    instance2 = Instance.from_db(db2)
-else:
-    client2 = client
-    db2 = db
-    instance2 = instance
+client2 = AsyncIOMotorClient(DATABASE_URI2)
+db2 = client2[DATABASE_NAME]
+instance2 = Instance.from_db(db2)
 
 
 @instance.register
 class Media(Document):
     file_id = fields.StrField(attribute="_id")
-    file_unique_id = fields.StrField(allow_none=True)
     file_ref = fields.StrField(allow_none=True)
     file_name = fields.StrField(required=True)
     file_size = fields.IntField(required=True)
     file_type = fields.StrField(allow_none=True)
     mime_type = fields.StrField(allow_none=True)
     caption = fields.StrField(allow_none=True)
-    cover = fields.StrField(allow_none=True)
 
     class Meta:
         indexes = ("$file_name",)
@@ -64,15 +50,12 @@ class Media(Document):
 @instance2.register
 class Media2(Document):
     file_id = fields.StrField(attribute="_id")
-    file_unique_id = fields.StrField(allow_none=True)
     file_ref = fields.StrField(allow_none=True)
     file_name = fields.StrField(required=True)
     file_size = fields.IntField(required=True)
     file_type = fields.StrField(allow_none=True)
     mime_type = fields.StrField(allow_none=True)
     caption = fields.StrField(allow_none=True)
-    cover = fields.StrField(allow_none=True)
-
 
     class Meta:
         indexes = ("$file_name",)
@@ -97,39 +80,26 @@ async def check_db_size(db):
         _db_stats_cache["primary_size"] = db_size_mb
         _db_stats_cache["timestamp"] = now
         return db_size_mb
-    except Exception:
-        logger.exception("Error checking database size")
+    except Exception as e:
+        print(f"Error Checking Database Size: {e}")
         return 0
 
 
 async def save_file(media):
     """Save file in database, with detailed logging."""
     file_id, file_ref = unpack_new_file_id(media.file_id)
-    file_unique_id = getattr(media, "file_unique_id", None)
     file_name = re.sub(
         r"[_\-\.#+$%^&*()!~`,;:\"'?/<>\[\]{}=|\\]", " ", str(media.file_name)
     )
     file_name = re.sub(r"\s+", " ", file_name).strip()
     saveMedia = Media
     target_db = "Primary"
-    duplicate_filter = {"$or": [{"file_id": file_id}]}
-    if file_unique_id:
-        duplicate_filter["$or"].append({"file_unique_id": file_unique_id})
-    try:
-        exists = await Media.find_one(duplicate_filter)
-        if exists:
-            logger.info(f"[SKIP] '{file_name}' already in Primary DB.")
-            return False, 0
-        if MULTIPLE_DB:
-            exists = await Media2.find_one(duplicate_filter)
-            if exists:
-                logger.info(f"[SKIP] '{file_name}' already in Secondary DB.")
-                return False, 0
-    except Exception as e:
-        logger.error("Error during duplicate check; continuing with save.", exc_info=e)
-
     if MULTIPLE_DB:
         try:
+            exists = await Media.count_documents({"file_id": file_id}, limit=1)
+            if exists:
+                logger.info(f"[SKIP] '{file_name}' already in Primary DB.")
+                return False, 0
             primary_db_size = await check_db_size(db)
             if primary_db_size >= 407:
                 saveMedia = Media2
@@ -140,21 +110,17 @@ async def save_file(media):
                 "Error during MULTIPLE_DB check; defaulting to primary DB.", exc_info=e
             )
     try:
-        cover_media = getattr(media, "video_cover", None) or getattr(media, "cover", None)
-        cover_to_use = getattr(cover_media, "file_id", None)
         record = saveMedia(
             file_id=file_id,
-            file_unique_id=file_unique_id,
             file_ref=file_ref,
             file_name=file_name,
             file_size=media.file_size,
             file_type=media.file_type,
             mime_type=media.mime_type,
             caption=(media.caption.html if media.caption and INDEX_CAPTION else None),
-            cover=cover_to_use if COVERX else None,
         )
-    except Exception as e:
-        logger.exception(f"[ERROR] '{file_name}' → {e}")
+    except ValidationError as e:
+        logger.exception(f"[VALIDATION ERROR] '{file_name}' → {e}")
         return False, 2
     try:
         await record.commit()
@@ -168,139 +134,131 @@ async def save_file(media):
             f"[ERROR] Failed commit of '{file_name}' to {target_db} DB.", exc_info=e
         )
         return False, 3
-    #logger.info(f"[SUCCESS] '{file_name}' saved to {target_db} DB.")
+    logger.info(f"[SUCCESS] '{file_name}' saved to {target_db} DB.")
     return True, 1
 
-async def get_search_results(chat_id, query, file_type=None, max_results=None, offset=0, filter=False):
-    if chat_id is not None and max_results is None:
+
+async def get_search_results(
+    chat_id, query, file_type=None, max_results=10, offset=0, filter=False
+):
+    if chat_id is not None:
         settings = await get_settings(int(chat_id))
-        if "max_btn" not in settings:
-            await save_group_settings(int(chat_id), "max_btn", True)
-            settings["max_btn"] = True
-        max_results = 10 if settings["max_btn"] else int(MAX_B_TN)
+        try:
+            max_results = 10 if settings.get("max_btn") else int(MAX_B_TN)
+        except KeyError:
+            await save_group_settings(int(chat_id), "max_btn", False)
+            settings = await get_settings(int(chat_id))
+            max_results = 10 if settings.get("max_btn") else int(MAX_B_TN)
     if isinstance(query, list):
-        raw_pattern = "|".join(re.escape(q.strip()) for q in query if q and q.strip())
-        if not raw_pattern:
-            return [], None, 0
-        regex = compile_regex(raw_pattern)
+        regex_list = []
+        for q in query:
+            q = q.strip()
+            if not q:
+                continue
+            if " " not in q:
+                raw = r"(\b|[\.\+\-_])" + re.escape(q) + r"(\b|[\.\+\-_])"
+            else:
+                raw = re.escape(q).replace(r"\ ", r".*[\s\.\+\-_()]")
+            regex_list.append(re.compile(raw, re.IGNORECASE))
+
         if USE_CAPTION_FILTER:
-            filter_mongo = {"$or": [{"file_name": regex},{"caption": regex},]}
+            filter_mongo = {
+                "$or": (
+                    [{"file_name": r} for r in regex_list]
+                    + [{"caption": r} for r in regex_list]
+                )
+            }
         else:
-            filter_mongo = {"file_name": regex}
+            filter_mongo = {"$or": [{"file_name": r} for r in regex_list]}
+
     else:
         query = query.strip()
         if not query:
-            return [], None, 0
-        if " " in query:
-            words = [re.escape(w) for w in query.split() if w]
-            raw_pattern = (r".*[\s\.\+\-_]".join(words) if words else r".")
+            raw_pattern = "."
+        elif " " not in query:
+            raw_pattern = r"(\b|[\.\+\-_])" + query + r"(\b|[\.\+\-_])"
         else:
-            raw_pattern = (r"(\b|[\.\+\-_])" + re.escape(query) + r"(\b|[\.\+\-_])" )
+            raw_pattern = query.replace(
+                " ", r".*[\s\.\+\-_()\[\]]" 
+            )
+
         try:
-            regex = compile_regex(raw_pattern)
+            regex = re.compile(raw_pattern, flags=re.IGNORECASE)
         except re.error:
-            return [], None, 0
+            return [], "", 0
+
         if USE_CAPTION_FILTER:
-            filter_mongo = { "$or": [{"file_name": regex}, {"caption": regex},]}
+            filter_mongo = {"$or": [{"file_name": regex}, {"caption": regex}]}
         else:
             filter_mongo = {"file_name": regex}
-
     if file_type:
         filter_mongo["file_type"] = file_type
+    total_results = await Media.count_documents(filter_mongo)
+    if MULTIPLE_DB:
+        total_results += await Media2.count_documents(filter_mongo)
 
-    if ULTRA_FAST_MODE:
-        limit = max_results + 1
-        if MULTIPLE_DB:
-            fetch_limit = offset + limit
-            results = await asyncio.gather(
-                Media.find(filter_mongo).sort("$natural", -1).limit(fetch_limit).to_list(length=fetch_limit),
-                Media2.find(filter_mongo).sort("$natural", -1).limit(fetch_limit).to_list(length=fetch_limit),
-            )
-            files = results[1] + results[0]
-            files = files[offset:offset + limit]
-        else:
-            files = await Media.find(filter_mongo).sort("$natural", -1).skip(offset).limit(limit).to_list(length=limit)
-        has_next_page = len(files) > max_results
-        if has_next_page:
-            files = files[:-1]
-        next_offset = offset + len(files) if has_next_page else ""
-        total_results = offset + len(files) + (1 if has_next_page else 0)
+    # if max_results % 2:
+    #     max_results += 1
+
+    cursor1 = (
+        Media.find(filter_mongo).sort("$natural", -1).skip(offset).limit(max_results)
+    )
+    files1 = await cursor1.to_list(length=max_results)
+
+    if MULTIPLE_DB:
+        remaining = max_results - len(files1)
+        cursor2 = (
+            Media2.find(filter_mongo).sort("$natural", -1).skip(offset).limit(remaining)
+        )
+        files2 = await cursor2.to_list(length=remaining)
+        files = files1 + files2
     else:
-        if MULTIPLE_DB:
-            fetch_limit = offset + max_results
-            count_results, find_results = await asyncio.gather(
-                asyncio.gather(Media.count_documents(filter_mongo), Media2.count_documents(filter_mongo)),
-                asyncio.gather(
-                    Media.find(filter_mongo).sort("$natural", -1).limit(fetch_limit).to_list(length=fetch_limit),
-                    Media2.find(filter_mongo).sort("$natural", -1).limit(fetch_limit).to_list(length=fetch_limit),
-                )
-            )
-            total_results = sum(count_results)
-            files = find_results[1] + find_results[0]
-            files = files[offset:offset + max_results]
-        else:
-            total_results = await Media.count_documents(filter_mongo)
-            files = await Media.find(filter_mongo).sort("$natural", -1).skip(offset).limit(max_results).to_list(length=max_results)
-        next_offset = offset + len(files)
-        if next_offset >= total_results:
-            next_offset = ""
+        files = files1
+    next_offset = offset + len(files)
+    if next_offset >= total_results:
+        next_offset = ""
     return files, next_offset, total_results
+
 
 async def get_bad_files(query, file_type=None):
     query = query.strip()
     if not query:
-        return [], 0
-    if " " not in query:
-        raw_pattern = r"(\b|[\.\+\-_])" + re.escape(query) + r"(\b|[\.\+\-_])"
+        raw_pattern = '.'
+    elif ' ' not in query:
+        raw_pattern = r"(\b|[\.\+\-_])" + query + r"(\b|[\.\+\-_])"
     else:
-        raw_pattern = r".*[\s\.\+\-_]".join(map(re.escape, query.split()))
+        raw_pattern = query.replace(" ", r".*[\s\.\+\-_()]")
     try:
-        regex = compile_regex(raw_pattern)
-    except re.error:
-        return [], 0
+        regex = re.compile(raw_pattern, flags=re.IGNORECASE)
+    except:
+        return []
     if USE_CAPTION_FILTER:
-        filter_mongo = {
-            "$or": [
-                {"file_name": regex},
-                {"caption": regex}
-            ]
-        }
+        filter = {'$or': [{'file_name': regex}, {'caption': regex}]}
     else:
-        filter_mongo = {"file_name": regex}
-
+        filter = {'file_name': regex}
     if file_type:
-        filter_mongo["file_type"] = file_type
-
-    tasks = [
-        Media.find(filter_mongo)
-        .sort("$natural", -1)
-        .to_list(300)
-    ]
-
+        filter['file_type'] = file_type
+    cursor1 = Media.find(filter).sort('$natural', -1)
+    files1 = await cursor1.to_list(length=(await Media.count_documents(filter)))
     if MULTIPLE_DB:
-        tasks.append(
-            Media2.find(filter_mongo)
-            .sort("$natural", -1)
-            .to_list(300)
-        )
-    results = await asyncio.gather(*tasks)
-    if MULTIPLE_DB and len(results) > 1:
-        files = results[1] + results[0]
+        cursor2 = Media2.find(filter).sort('$natural', -1)
+        files2 = await cursor2.to_list(length=(await Media2.count_documents(filter)))
+        files = files1 + files2
     else:
-        files = results[0]
-    files = files[:300]
-    return files, len(files)
+        files = files1
+    total_results = len(files)
+    return files, total_results
+
 
 async def get_file_details(query):
     filter = {"file_id": query}
-    tasks = [Media.find(filter).to_list(length=1)]
-    if MULTIPLE_DB:
-        tasks.append(Media2.find(filter).to_list(length=1))  
-    results = await asyncio.gather(*tasks)
-    for filedetails in results:
-        if filedetails:
-            return filedetails       
-    return []
+    cursor = Media.find(filter)
+    filedetails = await cursor.to_list(length=1)
+    if not filedetails:
+        cursor2 = Media2.find(filter)
+        filedetails = await cursor2.to_list(length=1)
+    return filedetails
+
 
 def encode_file_id(s: bytes) -> str:
     r = b""
@@ -340,7 +298,7 @@ def unpack_new_file_id(new_file_id):
 async def dreamxbotz_fetch_media(limit: int) -> List[dict]:
     try:
         if MULTIPLE_DB:
-            db_size = await check_db_size(db)
+            db_size = await check_db_size(Media)
             if db_size > 407:
                 cursor = Media2.find().sort("$natural", -1).limit(limit)
                 files = await cursor.to_list(length=limit)
