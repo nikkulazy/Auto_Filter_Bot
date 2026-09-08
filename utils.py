@@ -4,7 +4,6 @@ import os
 import random
 import string
 from info import ULTRA_FAST_MODE, MAX_LIST_ELM, BAD_WORDS, LONG_IMDB_DESCRIPTION, IS_VERIFY, MAX_B_TN, TUTORIAL, TUTORIAL_2, TUTORIAL_3, LOG_CHANNEL, TMDB_ON_SEARCH
-from imdbkit import IMDBKit  # pyrefly: ignore 
 import asyncio
 from pyrogram.types import Message, InlineKeyboardButton
 from pyrogram.errors import InputUserDeactivated, UserNotParticipant, FloodWait, UserIsBlocked, PeerIdInvalid, ChatAdminRequired
@@ -18,22 +17,19 @@ import aiohttp
 from shortzy import Shortzy
 from plugins.Dreamxfutures.Imdbposter import get_movie_detailsx
 
+# ✅ IMDbPY use kar rahe hain (imdbkit ki jagah)
+import imdb
+imdb = imdb.Cinemagoer()
 
 logger = logging.getLogger(__name__)
 
-# ============================================================
-# ✅ MISSING FUNCTION - ADD THIS
-# ============================================================
 def get_random_mix_id():
     chars = string.ascii_letters + string.digits
     return ''.join(random.choices(chars, k=6))
-# ============================================================
 
 BTN_URL_REGEX = re.compile(
     r"(\[([^\[]+?)\]\((buttonurl|buttonalert):(?:/{0,2})(.+?)(:same)?\))"
 )
-
-imdb = IMDBKit()
 
 BANNED = {}
 SMART_OPEN = '“'
@@ -245,104 +241,124 @@ def listx_to_str(k):
     return ', '.join(result) if result else "N/A"
     
 async def get_poster(query, bulk=False, id=False, file=None):
-    if not id:
-        query = (query.strip()).lower()
-        title = query
-        year_val = None
-        
-        year_list = re.findall(r'[1-2]\d{3}$', query, re.IGNORECASE)
-        if year_list:
-            year_val = year_list[0]
-            title = (query.replace(year_val, "")).strip()
-        elif file is not None:
-            year_list = re.findall(r'[1-2]\d{3}', file, re.IGNORECASE)
+    """Get movie poster from IMDb using IMDbPY"""
+    try:
+        if not id:
+            query = (query.strip()).lower()
+            title = query
+            year_val = None
+            
+            year_list = re.findall(r'[1-2]\d{3}$', query, re.IGNORECASE)
             if year_list:
                 year_val = year_list[0]
-        
-        search_result = await asyncio.to_thread(imdb.search_movie, title.lower())
-        if not search_result or not hasattr(search_result, 'titles'):
-            return None
-        
-        movie_list = search_result.titles[:MAX_LIST_ELM]
-        
-        if year_val:
-            filtered = [m for m in movie_list if m.year and str(m.year) == str(year_val)]
-            if not filtered:
-                filtered = movie_list
-        else:
-            filtered = movie_list
+                title = (query.replace(year_val, "")).strip()
+            elif file is not None:
+                year_list = re.findall(r'[1-2]\d{3}', file, re.IGNORECASE)
+                if year_list:
+                    year_val = year_list[0]
             
-        kind_filter = ['movie', 'tv series', 'tvSeries', 'tvMiniSeries', 'tvMovie']
-        filtered_kind = [m for m in filtered if m.kind and m.kind in kind_filter]
-        
-        if not filtered_kind:
-            filtered_kind = filtered
-        
-        if bulk:
-            return filtered_kind[:MAX_LIST_ELM]
-        if not filtered_kind:
-            return None   
-        movie_brief = filtered_kind[0]
-        movieid_str = movie_brief.imdb_id 
-    else:
-        movieid_str = query
+            # IMDbPY search
+            search_result = await asyncio.to_thread(imdb.search_movie, title.lower())
+            if not search_result:
+                return None
+            
+            movie_list = search_result[:MAX_LIST_ELM] if MAX_LIST_ELM else search_result[:10]
+            
+            if year_val:
+                filtered = [m for m in movie_list if m.get('year') and str(m.get('year')) == str(year_val)]
+                if not filtered:
+                    filtered = movie_list
+            else:
+                filtered = movie_list
+                
+            kind_filter = ['movie', 'tv series', 'tv series', 'tv mini series', 'tv movie']
+            filtered_kind = [m for m in filtered if m.get('kind') and m.get('kind').lower() in kind_filter]
+            
+            if not filtered_kind:
+                filtered_kind = filtered
+            
+            if bulk:
+                return filtered_kind[:MAX_LIST_ELM] if MAX_LIST_ELM else filtered_kind[:10]
+            if not filtered_kind:
+                return None   
+            movie_brief = filtered_kind[0]
+            movieid_str = movie_brief.movieID
+        else:
+            movieid_str = query
 
-    movie = await asyncio.to_thread(imdb.get_movie, movieid_str)
-    if not movie:
+        movie = await asyncio.to_thread(imdb.get_movie, movieid_str)
+        if not movie:
+            return None
+
+        # IMDbPY movie data access
+        def get_movie_info(key, default="N/A"):
+            try:
+                val = movie.get(key, default)
+                if isinstance(val, list) and len(val) == 0:
+                    return default
+                return val if val else default
+            except:
+                return default
+
+        date = get_movie_info('original air date') or get_movie_info('year', "N/A")
+        
+        plot = get_movie_info('plot', "")
+        if isinstance(plot, list) and len(plot) > 0:
+            plot = plot[0]
+        if len(str(plot)) > 800:
+            plot = str(plot)[:800] + "..."
+            
+        imdb_id = f"tt{movieid_str}" if not str(movieid_str).startswith("tt") else movieid_str
+
+        # Genre filtering
+        STANDARD_GENRES = {
+            'Action', 'Adventure', 'Animation', 'Biography', 'Comedy', 'Crime', 'Documentary',
+            'Drama', 'Family', 'Fantasy', 'Film-Noir', 'History', 'Horror', 'Music',
+            'Musical', 'Mystery', 'Romance', 'Sci-Fi', 'Sport', 'Thriller', 'War', 'Western'
+        }
+        
+        raw_genres = get_movie_info('genres', "N/A")
+        if isinstance(raw_genres, list):
+            genres = ", ".join(g for g in raw_genres if g in STANDARD_GENRES) or "N/A"
+        else:
+            genres = str(raw_genres) if raw_genres else "N/A"
+
+        return {
+            'title': movie.get('title', 'Unknown'),
+            'votes': movie.get('votes', 0),
+            "aka": ", ".join(movie.get('akas', [])) if movie.get('akas') else "N/A",
+            "seasons": movie.get('number of seasons', "N/A"),
+            "box_office": movie.get('box office', "N/A"),
+            'localized_title': movie.get('localized title', "N/A"),
+            'kind': movie.get('kind', "N/A"),
+            "imdb_id": imdb_id,
+            "cast": ", ".join([p.get('name', '') for p in movie.get('cast', [])]) or "N/A",
+            "runtime": ", ".join(movie.get('runtimes', [])) or "N/A",
+            "countries": ", ".join(movie.get('countries', [])) or "N/A",
+            "certificates": ", ".join(movie.get('certificates', [])) or "N/A",
+            "languages": ", ".join(movie.get('languages', [])) or "N/A",
+            "director": ", ".join([p.get('name', '') for p in movie.get('director', [])]) or "N/A",
+            "writer": ", ".join([p.get('name', '') for p in movie.get('writer', [])]) or "N/A",
+            "producer": ", ".join([p.get('name', '') for p in movie.get('producer', [])]) or "N/A",
+            "composer": ", ".join([p.get('name', '') for p in movie.get('composer', [])]) or "N/A",
+            "cinematographer": ", ".join([p.get('name', '') for p in movie.get('cinematographer', [])]) or "N/A",
+            "music_team": ", ".join([p.get('name', '') for p in movie.get('music department', [])]) or "N/A",
+            "distributors": ", ".join(movie.get('distributors', [])) or "N/A",
+            'release_date': date,
+            'year': movie.get('year', "N/A"),
+            'genres': genres,
+            'poster': movie.get('full-size cover url', movie.get('cover url', "N/A")),
+            'plot': plot,
+            'rating': str(movie.get('rating', "N/A")),
+            "url": f"https://www.imdb.com/title/{imdb_id}"
+        }
+    except Exception as e:
+        logger.error(f"get_poster error: {e}")
         return None
-
-    if movie.release_date:
-        date = movie.release_date
-    elif movie.year:
-        date = str(movie.year)
-    else:
-        date = "N/A"
-        
-    plot = movie.plot[0] if isinstance(movie.plot, list) else movie.plot or ""
-    if len(plot) > 800:
-        plot = plot[:800] + "..."
-    imdb_id = movie.imdb_id
-    if not imdb_id.startswith("tt"):
-        imdb_id = f"tt{imdb_id}"
-    return {
-        'title': movie.title,
-        'votes': movie.votes,
-        "aka": listx_to_str(movie.title_akas),
-        "seasons": (
-            len(movie.info_series.display_seasons)
-            if getattr(movie, "info_series", None)
-            and getattr(movie.info_series, "display_seasons", None)
-            else "N/A"
-        ),
-        "box_office": movie.worldwide_gross,
-        'localized_title': movie.title_localized,
-        'kind': movie.kind,
-        "imdb_id": imdb_id,
-        "cast": listx_to_str(movie.stars),
-        "runtime": listx_to_str(movie.duration),
-        "countries": listx_to_str(movie.countries),
-        "certificates": listx_to_str(movie.certificates),
-        "languages": listx_to_str(movie.languages),
-        "director": listx_to_str(movie.directors),
-        "writer": listx_to_str([p.name for p in movie.writers]),
-        "producer": listx_to_str([p.name for p in movie.producers]),
-        "composer": listx_to_str([p.name for p in movie.composers]),
-        "cinematographer": listx_to_str([p.name for p in movie.cinematographers]),
-        "music_team": listx_to_str([p.name for p in movie.music_team]),
-        "distributors": listx_to_str([c.name for c in movie.distributors]),        
-        'release_date': date,
-        'year': movie.year,
-        'genres': listx_to_str(movie.genres),
-        'poster': movie.cover_url,
-        'plot': plot,
-        'rating': str(movie.rating),
-        "url": movie.url or f"https://www.imdb.com/title/{imdb_id}"
-    }
     
 async def get_posterx(query, bulk=False, id=False, file=None):
     """
     Fetches movie details from TMDB using the get_movie_detailsx helper
-    and formats the output to be compatible with the original get_poster function.
     """
     if not id:
         details = await get_movie_detailsx(query, file=file)
@@ -489,7 +505,7 @@ def extract_request_content(message_text):
     return message_text.strip()
 
 def generate_settings_text(settings, title, reset_done=False):
-    note = "\n<b>📌 ɴᴏᴛᴇ :- ʀᴇꜱᴇᴛ ꜱᴜᴄᴄᴇꜱꜱꜰᴜʟʟʏ ✅</b>" if reset_done else ""
+    note = "\n<b>📌 ɴᴏᴛᴇ :- ʀᴇꜱᴇᴛ ꜱᴜᴄᴄᴇꜱꜱғᴜʟʟʏ ✅</b>" if reset_done else ""
     return f"""<b>⚙️ ʏᴏᴜʀ sᴇᴛᴛɪɴɢs ꜰᴏʀ - {title}</b>
 
 ✅️ <b><u>1sᴛ ᴠᴇʀɪꜰʏ sʜᴏʀᴛɴᴇʀ</u></b>
